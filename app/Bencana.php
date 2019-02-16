@@ -1,6 +1,6 @@
 <?php
 
-namespace App;
+namespace Banjir;
 
 use Illuminate\Database\Eloquent\Model;
 

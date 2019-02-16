@@ -1,9 +1,9 @@
 <?php
 
-namespace App\Http\Controllers\Auth;
+namespace Banjir\Http\Controllers\Auth;
 
-use App\User;
-use App\Http\Controllers\Controller;
+use Banjir\User;
+use Banjir\Http\Controllers\Controller;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Foundation\Auth\RegistersUsers;
 
@@ -58,7 +58,7 @@ class RegisterController extends Controller
      * Create a new user instance after a valid registration.
      *
      * @param  array  $data
-     * @return \App\User
+     * @return \Banjir\User
      */
     protected function create(array $data)
     {

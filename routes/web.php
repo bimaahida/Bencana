@@ -21,3 +21,8 @@ $router->group(['prefix' => 'bencana'],function() use ($router){
     $router->get('/',  ['uses' => 'BencanaController@index']);
     $router->post('/importAction',  ['uses' => 'BencanaController@import']);
 });
+
+Auth::routes();
+
+Route::get('/home', 'HomeController@index')->name('home');
+

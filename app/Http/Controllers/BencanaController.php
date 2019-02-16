@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Http\Controllers;
+namespace Banjir\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Input;
@@ -88,20 +88,33 @@ class BencanaController extends Controller
     }
     public function import()
     {
-        if(Input::hasFile('import_file')){
-			$path = Input::file('import_file')->getRealPath();
-			$data = Excel::load($path, function($reader) {})->get();
-			if(!empty($data) && $data->count()){
-                var_dump($data[9][0]);
-				// foreach ($data as $key => $value) {
-				// 	$insert[] = ['title' => $value->title, 'description' => $value->description];
-				// }
-				// if(!empty($insert)){
-				// 	DB::table('items')->insert($insert);
-				// 	dd('Insert Record successfully.');
-				// }
+        if(Input::hasFile('import_files')){
+            $data_cel = [];
+            $input = Input::file('import_files'); 
+            foreach ($input as $key) {
+                $path = $key->getRealPath();
+                //get value dari row ke 2
+                // Excel::selectSheets('sheet1')->load();
+                $data = Excel::load($path, function($reader) {})->get()->toArray();
+                    var_dump($data[6]);
+                //get value row ke 1
+                // $headerRow = $data->first()->keys()->toArray();
+                // if(!empty($data) && $data->count()){
+                //     array_push($data_cel,$data);
+                // 	// foreach ($data as $key => $value) {
+                // 	// 	$insert[] = ['title' => $value->title, 'description' => $value->description];
+                // 	// }
+                // 	// if(!empty($insert)){
+                // 	// 	DB::table('items')->insert($insert);
+                // 	// 	dd('Insert Record successfully.');
+                // 	// }
+                // }
             }
-		}
+            // var_dump($data_cel);
+			
+		}else{
+            return redirect('bencana');
+        }
     }
     public function maps()
     {

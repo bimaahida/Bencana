@@ -171,11 +171,11 @@ return [
         /*
          * Application Service Providers...
          */
-        App\Providers\AppServiceProvider::class,
-        App\Providers\AuthServiceProvider::class,
-        // App\Providers\BroadcastServiceProvider::class,
-        App\Providers\EventServiceProvider::class,
-        App\Providers\RouteServiceProvider::class,
+        Banjir\Providers\AppServiceProvider::class,
+        Banjir\Providers\AuthServiceProvider::class,
+        // Banjir\Providers\BroadcastServiceProvider::class,
+        Banjir\Providers\EventServiceProvider::class,
+        Banjir\Providers\RouteServiceProvider::class,
         Cornford\Googlmapper\MapperServiceProvider::class,
         'Maatwebsite\Excel\ExcelServiceProvider',
 

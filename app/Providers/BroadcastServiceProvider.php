@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Providers;
+namespace Banjir\Providers;
 
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\Broadcast;
