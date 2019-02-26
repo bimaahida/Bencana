@@ -18,8 +18,18 @@ $router->group(['prefix' => ''],function() use ($router){
 });
 
 $router->group(['prefix' => 'bencana'],function() use ($router){
-    $router->get('/',  ['uses' => 'BencanaController@index']);
-    $router->post('/importAction',  ['uses' => 'BencanaController@import']);
+    $router->get('/',  ['uses' => 'BencanaController@index','as' => 'bencana.index']);
+    $router->post('/importAction',  ['uses' => 'BencanaController@import','as' => 'bencana.importaction']);
+});
+$router->group(['prefix' => 'wilayah'],function() use ($router){
+    $router->get('/datatables',['uses' => 'WilayahController@dataTables','as' => 'wilayah.datatables']);
+    $router->get('/create',  ['uses' => 'WilayahController@create','as'=>'wilayah.create']);
+    $router->get('/show/{id}',  ['uses' => 'WilayahController@show','as'=>'wilayah.show']);
+    $router->get('/{id}',  ['uses' => 'WilayahController@edit','as' => 'wilayah.edit']);
+    $router->put('/{id}',  ['uses' => 'WilayahController@update','as' =>'wilayah.update']);
+    $router->delete('/{id}',  ['uses' => 'WilayahController@destroy','as' => 'wilayah.destroy']);
+    $router->post('/',  ['uses' => 'WilayahController@store','as'=>'wilayah.store']);
+    $router->get('/',  ['uses' => 'WilayahController@index','as'=>'wilayah.index']);
 });
 
 Auth::routes();

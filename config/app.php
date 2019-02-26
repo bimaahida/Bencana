@@ -163,6 +163,7 @@ return [
         Illuminate\Translation\TranslationServiceProvider::class,
         Illuminate\Validation\ValidationServiceProvider::class,
         Illuminate\View\ViewServiceProvider::class,
+        Yajra\Datatables\DatatablesServiceProvider::class,
 
         /*
          * Package Service Providers...
@@ -177,7 +178,6 @@ return [
         Banjir\Providers\EventServiceProvider::class,
         Banjir\Providers\RouteServiceProvider::class,
         Cornford\Googlmapper\MapperServiceProvider::class,
-        'Maatwebsite\Excel\ExcelServiceProvider',
 
     ],
 
@@ -229,6 +229,7 @@ return [
         'View' => Illuminate\Support\Facades\View::class,
         'Input' => Illuminate\Support\Facades\Input::class,
         'Mapper'=> Cornford\Googlmapper\Facades\MapperFacade::class,
+        'Datatables' => Yajra\Datatables\Facades\Datatables::class,
     ],
 
 ];

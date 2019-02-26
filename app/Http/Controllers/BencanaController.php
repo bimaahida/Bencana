@@ -7,6 +7,8 @@ use Input;
 use app\Bencana;
 use DB;
 use Maatwebsite\Excel\Facades\Excel;
+use Box\Spout\Reader\ReaderFactory;
+use Box\Spout\Common\Type;
 use Mapper;
 
 class BencanaController extends Controller
@@ -88,33 +90,34 @@ class BencanaController extends Controller
     }
     public function import()
     {
+        $datasExcel = [];
+        // var_dump(Input::hasFile('import_files'));
         if(Input::hasFile('import_files')){
-            $data_cel = [];
-            $input = Input::file('import_files'); 
-            foreach ($input as $key) {
-                $path = $key->getRealPath();
-                //get value dari row ke 2
-                // Excel::selectSheets('sheet1')->load();
-                $data = Excel::load($path, function($reader) {})->get()->toArray();
-                    var_dump($data[6]);
-                //get value row ke 1
-                // $headerRow = $data->first()->keys()->toArray();
-                // if(!empty($data) && $data->count()){
-                //     array_push($data_cel,$data);
-                // 	// foreach ($data as $key => $value) {
-                // 	// 	$insert[] = ['title' => $value->title, 'description' => $value->description];
-                // 	// }
-                // 	// if(!empty($insert)){
-                // 	// 	DB::table('items')->insert($insert);
-                // 	// 	dd('Insert Record successfully.');
-                // 	// }
-                // }
+            $file = Input::file('import_files'); 
+            $reader = ReaderFactory::create(Type::CSV);
+            $reader->setFieldDelimiter(',');
+            $reader->setEndOfLineCharacter("\n");
+            // var_dump($file[0]->path());
+            foreach ($file as $files) {
+                $reader->open($files->path());
+                foreach ($reader->getSheetIterator() as $sheet) {
+                    $dataExcel = $this->readOrderSheet($sheet);
+                    array_push($datasExcel,$dataExcel);
+                }   
             }
-            // var_dump($data_cel);
-			
+            var_dump($datasExcel[1][21]);
+            // $reader->close();
 		}else{
             return redirect('bencana');
         }
+    }
+
+    public function readOrderSheet($sheet){
+        $data = [];
+        foreach ($sheet->getRowIterator() as $idx => $row) {
+         array_push($data,$row);
+        }
+        return $data;
     }
     public function maps()
     {
