@@ -9,6 +9,7 @@ use Banjir\LatlongModel;
 use Yajra\Datatables\Datatables;
 use Banjir\Exceptions\Handler;
 use Validator;
+use Mapper;
 
 class WilayahController extends Controller
 {
@@ -81,7 +82,35 @@ class WilayahController extends Controller
      */
     public function show($id)
     {
-        echo 'show';
+        $data = AreaModel::with('LatLongs')->where('id',$id)->get();
+        $params = array();
+
+        if(empty($data)){
+            return redirect()
+                ->route('wilayah.index')
+                ->withErrors('Data Not Found !');
+        }else{
+            foreach ($data as $key) {
+                foreach($key->LatLongs as $lat){
+                    $a = array(
+                        'latitude' => $lat->latitude,
+                        'longitude' => $lat->longitude,
+                    );
+                    array_push($params,$a);
+                }
+            }
+            Mapper::map(53.381128999999990000, -1.470085000000040000);
+            Mapper::polygon(
+                $params,
+                [
+                    'strokeColor' => '#000000',
+                    'strokeOpacity' => 0.1,
+                    'strokeWeight' => 2,
+                    'fillColor' => '#FFFFFF'
+                ]
+            );
+            return view('wilayah.detail',$data[0]);   
+        }
     }
 
     /**
@@ -109,7 +138,6 @@ class WilayahController extends Controller
                 'button' => "Update",
                 'metod' => "post"
             );
-                
             return view('wilayah.create',$data);
         }
     }
@@ -148,10 +176,16 @@ class WilayahController extends Controller
     public function destroy($id)
     {
         $data = AreaModel::where('id',$id)->first();
-        $data->delete();
-        return redirect()
-            ->route('wilayah.index')
-            ->with('alert-success','Delete record Sucsessed!');
+        if (empty($data)) {
+            return redirect()
+                ->route('wilayah.index')
+                ->withErrors('Data Not Found !');
+        }else{
+            $data->delete();
+            return redirect()
+                ->route('wilayah.index')
+                ->with('alert-success','Delete record Sucsessed!');
+        }
     }
     public function dataTables(){
         $datas = AreaModel::all();
@@ -164,6 +198,14 @@ class WilayahController extends Controller
         })
         ->addColumn('detail_url', function ($datas) {
             return route('wilayah.show', $datas->id);
+        })
+        ->make(true);
+    }
+    public function dataTablesDetail($area){
+        $datas = LatlongModel::where('area_id',$area)->get();
+        return Datatables::of($datas)
+        ->addColumn('delete_url', function ($datas) {
+            return route('position.destroy', ['id' => $datas->id,'area' => $datas->area_id]);
         })
         ->make(true);
     }

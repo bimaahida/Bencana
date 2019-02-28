@@ -13,4 +13,8 @@ class LatlongModel extends Model
         'longitude',
         'area_id',
     ];
+
+    public function area(){
+        return $this->hasOne('Banjir\AreaModel');
+    } 
 }

@@ -12,6 +12,13 @@
                 {{ \Illuminate\Support\Facades\Session::get('alert-success') }}
             </div>    
             @endif
+            @if(!empty($errors->all()))
+            <div class="alert alert-danger alert-dismissible fade show">  
+                <button type="button" class="close" data-dismiss="alert">×</button>  
+                <h4 class="alert-heading">ERROR!</h4>
+                {!! $errors->first() !!}
+            </div>    
+            @endif
             <div class="card">
                 <div class="card-header">
 					Table WIlayah
@@ -44,7 +51,7 @@
                 { data: null, render: function(data){
                     var detail_button = '<a href="' + data.detail_url + '" class="btn btn-warning" role="button" aria-pressed="true" style="margin-right: 10px;">Detail</a>';
                     var edit_button = '<a href="' + data.edit_url + '" class="btn btn-primary" role="button" aria-pressed="true" style="margin-right: 10px;">Edit</a>';
-                    var delete_button = '<form action="' + data.delete_url + '" method="POST" style="display: contents;"><input type="hidden" name="_method" value="delete">{{csrf_field()}}<button type="submit" class="btn btn-danger" style="margin-right: 10px;">Delete</button>';
+                    var delete_button = '<form action="' + data.delete_url + '" method="POST" style="display: contents;"><input type="hidden" name="_method" value="delete">{{csrf_field()}}<button type="submit" class="btn btn-danger" style="margin-right: 10px;" >Delete</button>';
                     return detail_button+edit_button + delete_button;
                 }},
             ],
