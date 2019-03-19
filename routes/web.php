@@ -20,6 +20,7 @@ $router->group(['prefix' => ''],function() use ($router){
 $router->group(['prefix' => 'bencana'],function() use ($router){
     $router->get('/',  ['uses' => 'BencanaController@index','as' => 'bencana.index']);
     $router->post('/importAction',  ['uses' => 'BencanaController@import','as' => 'bencana.importaction']);
+    $router->get('/loadData',  ['uses' => 'BencanaController@loadData','as' => 'bencana.loadData']);
 });
 
 $router->group(['prefix' => 'wilayah'],function() use ($router){
@@ -37,6 +38,7 @@ $router->group(['prefix' => 'wilayah'],function() use ($router){
 $router->group(['prefix' => 'position'],function() use ($router){
     $router->post('/',  ['uses' => 'LatlongController@store','as' => 'position.store']);
     $router->delete('/{id}/{area}',  ['uses' => 'LatlongController@destroy','as' => 'position.destroy']);
+    $router->get('/loadData',  ['uses' => 'LatlongController@loadData','as' => 'position.loadData']);
 });
 
 Auth::routes();

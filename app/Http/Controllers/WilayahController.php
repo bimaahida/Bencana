@@ -99,14 +99,15 @@ class WilayahController extends Controller
                     array_push($params,$a);
                 }
             }
-            Mapper::map(53.381128999999990000, -1.470085000000040000);
+            Mapper::map(-7.642431,110.457015,['zoom' =>12,]);
             Mapper::polygon(
                 $params,
                 [
-                    'strokeColor' => '#000000',
-                    'strokeOpacity' => 0.1,
+                    'strokeColor' => '#f1c40f',
+                    'strokeOpacity' => 0.8,
                     'strokeWeight' => 2,
-                    'fillColor' => '#FFFFFF'
+                    'fillColor' => '#f1c40f',
+                    'fillOpacity' => 0.4,
                 ]
             );
             return view('wilayah.detail',$data[0]);   

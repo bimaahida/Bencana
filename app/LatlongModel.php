@@ -6,8 +6,12 @@ use Illuminate\Database\Eloquent\Model;
 
 class LatlongModel extends Model
 {
+    public $timestamps = false;
+
     protected $table = 'latlong';
+    
     protected $primaryKey= 'id';
+    
     protected $fillable = [
         'latitude',
         'longitude',
@@ -15,6 +19,6 @@ class LatlongModel extends Model
     ];
 
     public function area(){
-        return $this->hasOne('Banjir\AreaModel');
+        return $this->belongsTo('Banjir\AreaModel','area_id',$this->primaryKey);
     } 
 }
