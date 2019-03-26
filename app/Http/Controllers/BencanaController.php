@@ -137,6 +137,204 @@ class BencanaController extends Controller
         }
     }
 
+    public function NaiveBayes($dataUji){
+        $dataLatih = [];
+
+        $paramRainfall = array(
+            'rendah' => array(
+                'aman' => array(),
+                'rawan' => array(),
+                'prob_aman'=> 0,
+                'prob_rawan'=> 0,
+            ),
+            'sedang' => array(
+                'aman' => array(),
+                'rawan' => array(),
+                'prob_aman'=> 0,
+                'prob_rawan'=> 0,
+            ),
+            'tinggi' => array(
+                'aman' => array(),
+                'rawan' => array(),
+                'prob_aman'=> 0,
+                'prob_rawan'=> 0,
+            ),
+        );
+        $paramSlope = array(
+            'landai' => array(
+                'aman' => array(),
+                'rawan' => array(),
+                'prob_aman'=> 0,
+                'prob_rawan'=> 0,
+            ),
+            'sedang' => array(
+                'aman' => array(),
+                'rawan' => array(),
+                'prob_aman'=> 0,
+                'prob_rawan'=> 0,
+            ),
+            'curam' => array(
+                'aman' => array(),
+                'rawan' => array(),
+                'prob_aman'=> 0,
+                'prob_rawan'=> 0,
+            ),
+        );
+        $paramSoil = array(
+            'soil' => array(
+                'aman' => array(),
+                'rawan' => array(),
+                'prob_aman'=> 0,
+                'prob_rawan'=> 0,
+            ),
+            'non_soil' => array(
+                'aman' => array(),
+                'rawan' => array(),
+                'prob_aman'=> 0,
+                'prob_rawan'=> 0,
+            ),
+        );
+
+        $data = ParameterModel::where('area_id',$dataUji['area_id'])->get();
+        $aman = ParameterModel::where('area_id',$dataUji['area_id'])->where('status','aman')->get();
+        $rawan = ParameterModel::where('area_id',$dataUji['area_id'])->where('status','rawan')->get();
+
+        foreach ($data as $key) {
+            $rainfall = $this->rescale_rain($key->rainfall);
+
+            $slope = $this->rescale_slope($key->slope);
+
+            $params = array(
+                'rainfall' => $rainfall,
+                'slope' => $slope,
+                'soil' => $key->soil,
+                'area_id' => $key->area_id,
+                'status' => $key->status,
+                'date' => $key->date
+            );
+
+            if($params['rainfall'] == 'RENDAH'){
+                if($params['status'] == 'AMAN'){
+                    array_push($paramRainfall['rendah']['aman'],$params);
+                }else{
+                    array_push($paramRainfall['rendah']['rawan'],$params);
+                }
+            }elseif ($params['rainfall'] == 'SEDANG') {
+                if($params['status'] == 'AMAN'){
+                    array_push($paramRainfall['sedang']['aman'],$params);
+                }else{
+                    array_push($paramRainfall['sedang']['rawan'],$params);
+                }
+            }else{
+                if($params['status'] == 'AMAN'){
+                    array_push($paramRainfall['tinggi']['aman'],$params);
+                }else{
+                    array_push($paramRainfall['tinggi']['rawan'],$params);
+                }
+            }
+
+            if($params['slope'] == 'LANDAI'){
+                if($params['status'] == 'AMAN'){
+                    array_push($paramSlope['landai']['aman'],$params);
+                }else{
+                    array_push($paramSlope['landai']['rawan'],$params);
+                }
+            }elseif ($params['slope'] == 'SEDANG') {
+                if($params['status'] == 'AMAN'){
+                    array_push($paramSlope['sedang']['aman'],$params);
+                }else{
+                    array_push($paramSlope['sedang']['rawan'],$params);
+                }
+            }else{
+                if($params['status'] == 'AMAN'){
+                    array_push($paramSlope['curam']['aman'],$params);
+                }else{
+                    array_push($paramSlope['curam']['rawan'],$params);
+                }
+            }
+
+            if($params['soil'] == 'SOIL'){
+                if($params['status'] == 'AMAN'){
+                    array_push($paramSoil['soil']['aman'],$params);
+                }else{
+                    array_push($paramSoil['soil']['rawan'],$params);
+                }
+            }else{
+                if($params['status'] == 'AMAN'){
+                    array_push($paramSoil['non_soil']['aman'],$params);
+                }else{
+                    array_push($paramSoil['non_soil']['rawan'],$params);
+                }
+            }
+            array_push($dataLatih,$params);
+        }
+
+        $dataUji['rainfall'] = $this->rescale_rain($dataUji['rainfall']);
+        $dataUji['slope'] = $this->rescale_slope($dataUji['slope']); 
+
+        $paramRainfall['rendah']['prob_aman'] = count($paramRainfall['rendah']['aman'])/count($aman);
+        $paramRainfall['rendah']['prob_rawan'] = count($paramRainfall['rendah']['rawan'])/count($rawan);
+        $paramRainfall['sedang']['prob_aman'] = count($paramRainfall['sedang']['aman'])/count($aman);
+        $paramRainfall['sedang']['prob_rawan'] = count($paramRainfall['sedang']['rawan'])/count($rawan);
+        $paramRainfall['tinggi']['prob_aman'] = count($paramRainfall['tinggi']['aman'])/count($aman);
+        $paramRainfall['tinggi']['prob_rawan'] = count($paramRainfall['tinggi']['rawan'])/count($rawan);
+
+        $paramSlope['landai']['prob_aman'] = count($paramSlope['landai']['aman'])/count($aman);
+        $paramSlope['landai']['prob_rawan'] = count($paramSlope['landai']['rawan'])/count($rawan);
+        $paramSlope['sedang']['prob_aman'] = count($paramSlope['sedang']['aman'])/count($aman);
+        $paramSlope['sedang']['prob_rawan'] = count($paramSlope['sedang']['rawan'])/count($rawan);
+        $paramSlope['curam']['prob_aman'] = count($paramSlope['curam']['aman'])/count($aman);
+        $paramSlope['curam']['prob_rawan'] = count($paramSlope['curam']['rawan'])/count($rawan);
+
+
+        $paramSoil['soil']['prob_aman'] = count($paramSoil['soil']['aman'])/count($aman);
+        $paramSoil['soil']['prob_rawan'] = count($paramSoil['soil']['rawan'])/count($rawan);
+        $paramSoil['non_soil']['prob_aman'] = count($paramSoil['non_soil']['aman'])/count($aman);
+        $paramSoil['non_soil']['prob_rawan'] = count($paramSoil['non_soil']['rawan'])/count($rawan);
+
+        $rainRawan = $paramRainfall[strtolower($dataUji['rainfall'])]['prob_rawan'];
+        $rainAman =  $paramRainfall[strtolower($dataUji['rainfall'])]['prob_aman'];
+        $slopeRawan = $paramSlope[strtolower($dataUji['slope'])]['prob_rawan'];
+        $slopeAman = $paramSlope[strtolower($dataUji['slope'])]['prob_aman'];
+        if(strtolower($dataUji['soil']) == 'soil'){
+            $soiltype = strtolower($dataUji['soil']);
+        }else{
+            $soiltype = 'non_soil';
+        }
+        $soilRawan = $paramSoil[$soiltype]['prob_rawan'];
+        $soilAman = $paramSoil[$soiltype]['prob_aman'];
+
+        $pAman = ($rainAman * $slopeAman * $soilAman)/count($aman);
+        $pRawan = ($rainRawan * $slopeRawan * $soilRawan)/count($rawan);
+
+        if($pAman > $pRawan){
+            echo "Status Aman \n";
+            echo "Nilai : ".$pAman;
+        }else{
+            echo "Status Rawan \n";
+            echo "Nilai : ".$pRawan;
+        }
+        // dd($dataUji);
+        
+    }
+    public function rescale_rain($param){
+        if($param < 5){
+            return 'RENDAH';
+        }elseif ($param >= 5 && $param < 10) {
+            return 'SEDANG';
+        }else{
+            return 'TINGGI';
+        }
+    }
+    public function rescale_slope($param){
+        if($param < 5){
+            return 'CURAM';
+        }elseif ($param >= 5 && $param < 10) {
+            return 'SEDANG';
+        }else{
+            return 'LANDAI';
+        }
+    }
     public function readOrderSheet($sheet){
         $data = [];
         foreach ($sheet->getRowIterator() as $idx => $row) {
@@ -144,8 +342,7 @@ class BencanaController extends Controller
         }
         return $data;
     }
-    public function maps()
-    {
+    public function maps(){
         $data = LatlongModel::with('area')->get();
         $params = array(
             array(),
@@ -200,47 +397,53 @@ class BencanaController extends Controller
     }
 
     public function loadData(){
-        $datasExcel = [];
-        $file = "C:\Users\BM\Google Drive\Skripsi\Percobaan NaiveBayes.xlsx"; 
-        $reader = ReaderFactory::create(Type::XLSX );
-        // $reader->setFieldDelimiter(',');
-        // $reader->setEndOfLineCharacter("\n");
-        $reader->open($file);
-            foreach ($reader->getSheetIterator() as $sheet) {
-                $dataExcel = $this->readOrderSheet($sheet);
-                array_push($datasExcel,$dataExcel);
-            }   
-        // var_dump($datasExcel[0]);
-        $reader->close();
-        for ($i=0; $i < count($datasExcel[0]) ; $i++) { 
-            if($i > 0){
-                $sungai = $datasExcel[0][$i][0]." ".$datasExcel[0][$i][1];
-                if($datasExcel[0][$i][0] == "Gendol"){
-                    if ($sungai == "Gendol Tengah") {
-                        $areaid = 1;
-                    }else if($sungai == "Gendol Hulu"){
-                        $areaid = 2;
-                    }else{
-                        $areaid = 3;
-                    }
+        $dataTest = array(
+            'rainfall' => 5.00,
+            'soil' => 'SOIL',
+            'slope' => 23.7,
+            'area_id' => 1,
+        );
+        $this->NaiveBayes($dataTest);
+        // $datasExcel = [];
+        // $file = "C:\Users\BM\Google Drive\Skripsi\Percobaan NaiveBayes.xlsx"; 
+        // $reader = ReaderFactory::create(Type::XLSX );
+        // // $reader->setFieldDelimiter(',');
+        // // $reader->setEndOfLineCharacter("\n");
+        // $reader->open($file);
+        //     foreach ($reader->getSheetIterator() as $sheet) {
+        //         $dataExcel = $this->readOrderSheet($sheet);
+        //         array_push($datasExcel,$dataExcel);
+        //     }   
+        // // var_dump($datasExcel[0]);
+        // $reader->close();
+        // for ($i=0; $i < count($datasExcel[0]) ; $i++) { 
+        //     if($i > 0){
+        //         $sungai = $datasExcel[0][$i][0]." ".$datasExcel[0][$i][1];
+        //         if($datasExcel[0][$i][0] == "Gendol"){
+        //             if ($sungai == "Gendol Tengah") {
+        //                 $areaid = 1;
+        //             }else if($sungai == "Gendol Hulu"){
+        //                 $areaid = 2;
+        //             }else{
+        //                 $areaid = 3;
+        //             }
 
-                    $data = New ParameterModel;
-                    $data->rainfall = $datasExcel[0][$i][2];
-                    $data->soil = $datasExcel[0][$i][8];
-                    $data->slope = $datasExcel[0][$i][5];
-                    $data->status = $datasExcel[0][$i][9];
-                    $data->area_id = $areaid;
-                    $data->save();
-                    echo "Save success \n";
-                }else{
-                    echo "gagal\n";
-                }
-            }else{
-                echo "1 \n";
-            }
-        }
-        var_dump($dataExcel[0]);
-      
+        //             $data = New ParameterModel;
+        //             $data->rainfall = $datasExcel[0][$i][2];
+        //             $data->soil = $datasExcel[0][$i][8];
+        //             $data->slope = $datasExcel[0][$i][5];
+        //             $data->status = $datasExcel[0][$i][9];
+        //             $data->area_id = $areaid;
+        //             $data->save();
+        //             echo "Save success \n";
+        //         }else{
+        //             echo "gagal\n";
+        //         }
+        //     }else{
+        //         echo "1 \n";
+        //     }
+        // }
+        // var_dump($dataExcel[0]);      
     }
 
 }
