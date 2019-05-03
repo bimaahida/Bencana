@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Input;
 use Banjir\ParameterModel;
 use Banjir\LatlongModel;
+use Banjir\ParameterBayesModel;
 use DB;
 use Maatwebsite\Excel\Facades\Excel;
 use Box\Spout\Reader\ReaderFactory;
@@ -89,8 +90,7 @@ class BencanaController extends Controller
     {
         //
     }
-    public function import()
-    {
+    public function import(){
         $sumValHilir = 0;
         $sumValTengah = 0;
         $sumValHulu = 0;
@@ -3410,42 +3410,15 @@ class BencanaController extends Controller
                 'rainfall' => $sumValTengah/(count($parameTengah) * count($file)),
                 'soil' => 'SOIL',
                 'slope' => 0.09923,
-                'area_id' => 2,
+                'area_id' => 1,
             );
 
             $vHuluHasil = array(
                 'rainfall' => $sumValHulu/(count($parameHulu) * count($file)),
                 'soil' => 'NON-SOIL',
                 'slope' => 0.28234,
-                'area_id' => 1,
+                'area_id' => 2,
             );
-
-            // $data = New ParameterModel;
-            // $data->rainfall = round($vHuluHasil['rainfall'], 5);
-            // $data->soil = $vHuluHasil['soil'];
-            // $data->slope = $vHuluHasil['slope'];
-            // $data->status = 'AMAN';
-            // $data->area_id = $vHuluHasil['area_id'];
-            // $data->date = $date_now;
-            // $data->save();
-
-            // $data2 = New ParameterModel;
-            // $data2->rainfall = round($vTengahHasil['rainfall'], 5);
-            // $data2->soil = $vTengahHasil['soil'];
-            // $data2->slope = $vTengahHasil['slope'];
-            // $data2->status = 'AMAN';
-            // $data2->area_id = $vTengahHasil['area_id'];
-            // $data2->date = $date_now;
-            // $data2->save();
-
-            // $data3 = New ParameterModel;
-            // $data3->rainfall = round($vHilirHasil['rainfall'], 5);
-            // $data3->soil = $vHilirHasil['soil'];
-            // $data3->slope = $vHilirHasil['slope'];
-            // $data3->status = 'AMAN';
-            // $data3->area_id = $vHilirHasil['area_id'];
-            // $data3->date = $date_now;
-            // $data3->save();
             
 
             array_push($valueData['vHulu'],$vHuluHasil);
@@ -3455,6 +3428,33 @@ class BencanaController extends Controller
             $valueData['sHulu'] = $this->NaiveBayes($valueData['vHulu'][0]);
             $valueData['sTengah'] = $this->NaiveBayes($valueData['vTengah'][0]);
             $valueData['sHilir'] = $this->NaiveBayes($valueData['vHilir'][0]);
+
+            $data = New ParameterBayesModel;
+            $data->rainfall = round($vHuluHasil['rainfall'], 5);
+            $data->soil = $vHuluHasil['soil'];
+            $data->slope = $vHuluHasil['slope'];
+            $data->status = $valueData['sHulu']['text'];
+            $data->area_id = $vHuluHasil['area_id'];
+            $data->date = $date_now;
+            $data->save();
+
+            $data2 = New ParameterBayesModel;
+            $data2->rainfall = round($vTengahHasil['rainfall'], 5);
+            $data2->soil = $vTengahHasil['soil'];
+            $data2->slope = $vTengahHasil['slope'];
+            $data2->status = $valueData['sTengah']['text'];
+            $data2->area_id = $vTengahHasil['area_id'];
+            $data2->date = $date_now;
+            $data2->save();
+
+            $data3 = New ParameterBayesModel;
+            $data3->rainfall = round($vHilirHasil['rainfall'], 5);
+            $data3->soil = $vHilirHasil['soil'];
+            $data3->slope = $vHilirHasil['slope'];
+            $data3->status = $valueData['sHilir']['text'];
+            $data3->area_id = $vHilirHasil['area_id'];
+            $data3->date = $date_now;
+            $data3->save();
 
             var_dump($valueData);
         }else{
@@ -3524,7 +3524,6 @@ class BencanaController extends Controller
         $aman = ParameterModel::where('area_id',$dataUji['area_id'])->where('status','aman')->get();
         $rawan = ParameterModel::where('area_id',$dataUji['area_id'])->where('status','rawan')->get();
 
-        // var_dump(count($aman));
 
         foreach ($data as $key) {
             $rainfall = $this->rescale_rain($key->rainfall);
@@ -3532,7 +3531,9 @@ class BencanaController extends Controller
             $slope = $this->rescale_slope($key->slope);
 
             $params = array(
+                'v_rainfall' => $key->rainfall,
                 'rainfall' => $rainfall,
+                'v_slope' => $key->slope,
                 'slope' => $slope,
                 'soil' => $key->soil,
                 'area_id' => $key->area_id,
@@ -3596,6 +3597,8 @@ class BencanaController extends Controller
             array_push($dataLatih,$params);
         }
 
+
+
         $dataUji['rainfall'] = $this->rescale_rain($dataUji['rainfall']);
         $dataUji['slope'] = $this->rescale_slope($dataUji['slope']); 
 
@@ -3622,6 +3625,8 @@ class BencanaController extends Controller
         $rainAman =  $paramRainfall[strtolower($dataUji['rainfall'])]['prob_aman'];
         $slopeRawan = $paramSlope[strtolower($dataUji['slope'])]['prob_rawan'];
         $slopeAman = $paramSlope[strtolower($dataUji['slope'])]['prob_aman'];
+
+        // var_dump($dataUji);
         
         if(strtolower($dataUji['soil']) == 'soil'){
             $soiltype = strtolower($dataUji['soil']);
@@ -3636,13 +3641,13 @@ class BencanaController extends Controller
 
         if($pAman >= $pRawan){
             $returnVal = array(
-                'text' => 'Status Aman', 
+                'text' => 'Aman', 
                 'value' => $pAman, 
             );
             return $returnVal;
         }else{
             $returnVal = array(
-                'text' => 'Status Rawan', 
+                'text' => 'Rawan', 
                 'value' => $pRawan, 
             );
             return $returnVal;
@@ -3673,8 +3678,26 @@ class BencanaController extends Controller
         }
         return $data;
     }
+    private function getColorMarker($param){
+        if (empty($param->status)) {
+            return "#ecf0f1";
+        }else if ($param->status == "Aman") {
+            return "#2ecc71";
+        }else{
+            return "#e74c3c";
+        }
+    }
     public function maps(){
         $data = LatlongModel::with('area')->get();
+
+        $hulu = ParameterBayesModel::where('area_id','2')->orderBy('date', 'desc')->first();
+        $tengah = ParameterBayesModel::where('area_id','1')->orderBy('date', 'desc')->first();
+        $hilir = ParameterBayesModel::where('area_id','3')->orderBy('date', 'desc')->first();
+
+        $colorHulu = $this->getColorMarker($hulu);
+        $colorTengah = $this->getColorMarker($tengah);
+        $colorHilir = $this->getColorMarker($hilir);
+        
         $params = array(
             array(),
             array(),
@@ -3682,24 +3705,24 @@ class BencanaController extends Controller
         );
         $color = array(
             array(
-                'strokeColor' => '#0000FF',
+                'strokeColor' => $colorHulu,
                 'strokeOpacity' => 0.8,
                 'strokeWeight' => 2,
-                'fillColor' => '#0000FF',
+                'fillColor' => $colorHulu,
+                'fillOpacity' => 0.4,
+            ),
+            array(
+                'strokeColor' => $colorTengah,
+                'strokeOpacity' => 0.8,
+                'strokeWeight' => 2,
+                'fillColor' => $colorTengah,
                 'fillOpacity' => 0.4
             ),
             array(
-                'strokeColor' => '#f1c40f',
+                'strokeColor' => $colorHilir,
                 'strokeOpacity' => 0.8,
                 'strokeWeight' => 2,
-                'fillColor' => '#f1c40f',
-                'fillOpacity' => 0.4
-            ),
-            array(
-                'strokeColor' => '#8e44ad',
-                'strokeOpacity' => 0.8,
-                'strokeWeight' => 2,
-                'fillColor' => '#8e44ad',
+                'fillColor' => $colorHilir,
                 'fillOpacity' => 0.4
             ),
         );
@@ -3708,7 +3731,7 @@ class BencanaController extends Controller
                 'latitude' => $key->latitude,
                 'longitude' => $key->longitude,
             );
-            if($key->area_id == 1){
+            if($key->area_id == 3){
                 array_push($params[0],$a);
             }else if($key->area_id == 2){
                 array_push($params[1],$a);
@@ -3722,7 +3745,7 @@ class BencanaController extends Controller
             Mapper::polygon(
                 $params[$i],
                 $color[$i]
-            );   
+            ); 
         }
         return view('map');
     }
