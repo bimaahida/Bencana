@@ -14,13 +14,21 @@
 //     return view('welcome');
 // });
 $router->group(['prefix' => ''],function() use ($router){
-    $router->get('/',  ['uses' => 'BencanaController@maps']);
+    $router->get('/',  ['uses' => 'BencanaController@maps','as' =>'firstPage']);
 });
 
 $router->group(['prefix' => 'bencana'],function() use ($router){
     $router->get('/',  ['uses' => 'BencanaController@index','as' => 'bencana.index']);
     $router->post('/importAction',  ['uses' => 'BencanaController@import','as' => 'bencana.importaction']);
+    $router->post('/load_data_new',  ['uses' => 'BencanaController@load_data_new','as' => 'bencana.load_data_new']);
     $router->get('/loadData',  ['uses' => 'BencanaController@loadData','as' => 'bencana.loadData']);
+    $router->get('/config',  ['uses' => 'BencanaController@dataLatih','as' => 'bencana.config']);
+    $router->get('/datatableslatih',  ['uses' => 'BencanaController@dataTablesLatih','as' => 'bencana.datatableslatih']);
+    $router->get('/datatablesmodel',  ['uses' => 'BencanaController@dataTablesModel','as' => 'bencana.dataTablesmodel']);
+    $router->get('/datatabledetaildatalatih/{id}',  ['uses' => 'BencanaController@dataTableDetailDataLatih','as' => 'bencana.datatabledetaildatalatih']);
+    $router->get('/detaildatalatih/{id}',  ['uses' => 'BencanaController@detailDatalatih','as' => 'bencana.detaildatalatih']);
+    $router->post('/naiveBayesManual',  ['uses' => 'BencanaController@naiveBayesManual','as' => 'bencana.naiveBayesManual']);
+    $router->post('/importdatalatih',  ['uses' => 'BencanaController@importDataLatih','as' => 'bencana.importdatalatih']);
 });
 
 $router->group(['prefix' => 'wilayah'],function() use ($router){
@@ -39,6 +47,12 @@ $router->group(['prefix' => 'position'],function() use ($router){
     $router->post('/',  ['uses' => 'LatlongController@store','as' => 'position.store']);
     $router->delete('/{id}/{area}',  ['uses' => 'LatlongController@destroy','as' => 'position.destroy']);
     $router->get('/loadData',  ['uses' => 'LatlongController@loadData','as' => 'position.loadData']);
+});
+
+$router->group(['prefix' => 'auth'],function() use ($router){
+    $router->post('/',  ['uses' => 'UserController@login','as' => 'auth.login']);
+    $router->get('/logout',  ['uses' => 'UserController@logout','as' => 'auth.logout']);
+    $router->get('/',  ['uses' => 'UserController@index','as' => 'auth.index']);
 });
 
 Auth::routes();

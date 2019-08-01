@@ -8,7 +8,7 @@
     <!-- CSRF Token -->
     <meta name="csrf-token" content="{{ csrf_token() }}">
 
-    <title>{{ config('app.name', 'Laravel') }}</title>
+    <title>Bencana Lereng Merapi</title>
 
     <!-- Styles -->
     <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/v/bs4/dt-1.10.18/datatables.min.css"/>
@@ -23,7 +23,7 @@
     <!-- Navigation -->
     <nav class="navbar navbar-expand-lg navbar-light bg-light shadow fixed-top">
         <div class="container">
-            <a class="navbar-brand" href="#">{{ config('app.name', 'Laravel') }}</a>
+            <a class="navbar-brand" href="#">Bencana Lereng Merapi</a>
             <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarResponsive" aria-controls="navbarResponsive" aria-expanded="false" aria-label="Toggle navigation">
                 <span class="navbar-toggler-icon"></span>
                 </button>
@@ -34,12 +34,24 @@
                         <span class="sr-only">(current)</span>
                     </a>
                 </li>
-                <li class="nav-item">
-                    <a class="nav-link" href="{{ url('bencana') }}">Upload</a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link" href="{{ url('wilayah') }}">Area</a>
-                </li>
+                <?php if(!empty(session()->get('sessionAuth'))){ ?>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url('bencana') }}">Upload</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url('wilayah') }}">Area</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url('bencana/config') }}">Config</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url('auth/logout') }}">Logout</a>
+                    </li>
+                <?php }else{ ?>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url('auth') }}">Login</a>
+                    </li>
+                <?php } ?>
             </ul>
             </div>
         </div>

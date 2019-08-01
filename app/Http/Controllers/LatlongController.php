@@ -5,8 +5,10 @@ namespace Banjir\Http\Controllers;
 use Illuminate\Http\Request;
 
 use Banjir\Http\Controllers\Controller;
-
-use Banjir\LatlongModel;
+use Validator;
+use Banjir\LocationModel;
+use Banjir\ParameterModel;
+use Banjir\ParameterBayesModel;
 use DB;
 use Maatwebsite\Excel\Facades\Excel;
 use Box\Spout\Reader\ReaderFactory;
@@ -23,6 +25,8 @@ class LatlongController extends Controller
     protected $rule = array(
         'latitude' => 'required',
         'longitude' => 'required',
+        'colum' => 'required',
+        'row' => 'required',
         'area' => 'required'
     );
     
@@ -49,22 +53,27 @@ class LatlongController extends Controller
      */
     public function store(Request $request)
     {
+        // var_dump($request);
         $validator = Validator::make($request->all(),$this->rule);
         // var_dump($validator->fails());
         if($validator->fails()){
             return redirect()
-                ->route('wilayah.show',['id' => $request->id])
+                ->route('wilayah.show',['id' => $request->area])
                 ->withErrors($validator)
                 ->withInput();
         }else{
-            $data = New LatlongModel;
+            $data = New LocationModel;
+            $data->soil = $request->soil;
+            $data->slope = $request->slope;
             $data->latitude = $request->latitude;
             $data->longitude = $request->longitude;
-            $data->area_id = $request->id;
+            $data->colum = $request->colum;
+            $data->row = $request->row;
+            $data->area_id = $request->area;
             $data->save();
 
             return redirect()
-                ->route('wilayah.show',['id' => $request->id])
+                ->route('wilayah.show',['id' => $request->area])
                 ->with('alert-success','Insert record Sucsessed!');
         }
     }
@@ -111,15 +120,17 @@ class LatlongController extends Controller
      */
     public function destroy($id,$area)
     {
-        $data = LatlongModel::where('id',$id)->first();
+        $data = LocationModel::where('id',$id)->first();
         if (empty($data)) {
             return redirect()
                 ->route('wilayah.show',['id' => $id])
                 ->withErrors('Data Not Found !');
         }else{
+            ParameterModel::where('location_id',$id)->delete();
+            ParameterBayesModel::where('location_id',$id)->delete();
             $data->delete();
             return redirect()
-                ->route('wilayah.show',['id' => $id,'area' => $area])
+                ->route('wilayah.show',['area' => $area])
                 ->with('alert-success','Delete record Sucsessed!');
         }
     }

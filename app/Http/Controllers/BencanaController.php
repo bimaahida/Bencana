@@ -4,13 +4,21 @@ namespace Banjir\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Input;
+use Yajra\Datatables\Datatables;
 use Banjir\ParameterModel;
-use Banjir\LatlongModel;
+use Banjir\AreaModel;
+use Banjir\ModelModel;
+use Banjir\LocationModel;
 use Banjir\ParameterBayesModel;
 use DB;
 use Maatwebsite\Excel\Facades\Excel;
 use Box\Spout\Reader\ReaderFactory;
+use Box\Spout\Writer\WriterFactory;
 use Box\Spout\Common\Type;
+use Storage;
+use Session;
+use URL;
+
 use Mapper;
 
 class BencanaController extends Controller
@@ -20,9 +28,11 @@ class BencanaController extends Controller
      *
      * @return \Illuminate\Http\Response
      */
-    public function index()
-    {
-        return view('importExcel');
+    public function index(){
+        $data = array(
+            'model' => ModelModel::all(),
+        );
+        return view('importExcel',$data);
     }
 
     /**
@@ -30,8 +40,7 @@ class BencanaController extends Controller
      *
      * @return \Illuminate\Http\Response
      */
-    public function create()
-    {
+    public function create(){
         //
     }
 
@@ -41,8 +50,7 @@ class BencanaController extends Controller
      * @param  \Illuminate\Http\Request  $request
      * @return \Illuminate\Http\Response
      */
-    public function store(Request $request)
-    {
+    public function store(Request $request){
         //
     }
 
@@ -52,8 +60,7 @@ class BencanaController extends Controller
      * @param  int  $id
      * @return \Illuminate\Http\Response
      */
-    public function show($id)
-    {
+    public function show($id){
         //
     }
 
@@ -63,8 +70,7 @@ class BencanaController extends Controller
      * @param  int  $id
      * @return \Illuminate\Http\Response
      */
-    public function edit($id)
-    {
+    public function edit($id){
         //
     }
 
@@ -75,8 +81,7 @@ class BencanaController extends Controller
      * @param  int  $id
      * @return \Illuminate\Http\Response
      */
-    public function update(Request $request, $id)
-    {
+    public function update(Request $request, $id){
         //
     }
 
@@ -86,24 +91,692 @@ class BencanaController extends Controller
      * @param  int  $id
      * @return \Illuminate\Http\Response
      */
-    public function destroy($id)
-    {
+    public function destroy($id){
         //
     }
-    public function import(){
-        $sumValHilir = 0;
-        $sumValTengah = 0;
+    public function naiveBayesManual(Request $request){
+        $parameterProbabilitas = array(
+            'aman' => array(),
+            'rawan' => array(),
+            'paramSoil' => array(),
+            'paramSlope' => array(),
+            'paramRainfall' => array(),
+        );
+        
+        $dataLocation = New LocationModel;
+        $dataLocation->soil = $request->soil;
+        $dataLocation->slope = $request->slope;
+        $dataLocation->latitude = $request->latitude;
+        $dataLocation->longitude = $request->longitude;
+        $dataLocation->colum = $request->colum;
+        $dataLocation->row = $request->row;
+        $dataLocation->area_id = $request->area_id;
+        $dataLocation->save();
+
+        $parameter = array(
+            'rainfall' =>  $request->rainFall,
+            'soil' => $request->soil,
+            'slope' => $request->slope,
+            'location_id' => $dataLocation->id,
+            'date'=> date('Y-m-d H:i:s'),
+            'status' => '',
+        );
+        $parameter['status'] = $this->NaiveBayes($parameter,$parameterProbabilitas,116880,135917);
+
+        $dataParamter = New ParameterBayesModel;
+        $dataParamter->rainfall = round($parameter['rainfall'], 5);
+        $dataParamter->soil = $parameter['soil'];
+        $dataParamter->slope = $parameter['slope'];
+        $dataParamter->status = $parameter['status']['text'];
+        $dataParamter->location_id = $parameter['location_id'];
+        $dataParamter->date = $parameter['date'];
+        $dataParamter->save();
+
+        return $parameter;
+    }
+    public function import(Request $request){
+        $maxMin_id = explode(',',$request->model_naivebayes);
+
+        // dd($maxMin_id);
+
         $sumValHulu = 0;
+        $parameterProbabilitas = array(
+            'aman' => array(),
+            'rawan' => array(),
+            'paramSoil' => array(),
+            'paramSlope' => array(),
+            'paramRainfall' => array(),
+        );
 
         $datasExcel = [];
         $valueData = array(
             'vHulu' => array(),
-            'vTengah' => array(),
-            'vHilir' => array(),
-            'sHulu' => 0,
-            'sTengah' => 0,
-            'sHilir' => 0,
+            'akurasi' => 0,
         );
+        $location = LocationModel::get();
+
+        if(Input::hasFile('import_files')){
+            $file = Input::file('import_files'); 
+            $reader = ReaderFactory::create(Type::CSV);
+            $reader->setFieldDelimiter(',');
+            $reader->setEndOfLineCharacter("\n");
+
+            foreach ($file as $files) {
+                $reader->open($files->path());
+                foreach ($reader->getSheetIterator() as $sheet) {
+                    $dataExcel = $this->readOrderSheet($sheet);
+                    array_push($datasExcel,$dataExcel);
+                }   
+            }
+            $reader->close();
+            
+            for ($i=0; $i < count($file) ; $i++) { 
+                $date = explode("_",$file[$i]->getClientOriginalName());
+                $date_now = $date[1][0].$date[1][1].$date[1][2].$date[1][3].'-'.$date[1][4].$date[1][5].'-'.$date[1][6].$date[1][7].' '.$date[2][0].$date[2][1].':00:00';
+                $a = 0;
+                foreach ($location as $key) {
+                    $keyNew = $key->colum - 1;
+
+                    $parameter = array(
+                        'rainfall' =>  $datasExcel[$i][$keyNew][$key->row],
+                        'soil' => $key->soil,
+                        'slope' => $key->slope,
+                        'location_id' => $key->id,
+                        // 'date'=> date('Y-m-d H:i:s'),
+                        'date'=> $date_now,
+                        'status' => '',
+                    );
+                    $parameter['status'] = $this->NaiveBayes($parameter,$parameterProbabilitas,$maxMin_id[0],$maxMin_id[1]);
+                    
+                    array_push($valueData['vHulu'],$parameter);
+
+                    $parameterProbabilitas['aman'] = $parameter['status']['Aman'];
+                    $parameterProbabilitas['rawan'] = $parameter['status']['Rawan'];
+                    $parameterProbabilitas['paramSoil'] = $parameter['status']['paramSoil'];
+                    $parameterProbabilitas['paramSlope'] = $parameter['status']['paramSlope'];
+                    $parameterProbabilitas['paramRainfall'] = $parameter['status']['paramRainfall'];
+
+                    $data = New ParameterBayesModel;
+                    $data->rainfall = round($parameter['rainfall'], 5);
+                    $data->soil = $parameter['soil'];
+                    $data->slope = $parameter['slope'];
+                    $data->status = $parameter['status']['text'];
+                    $data->location_id = $parameter['location_id'];
+                    $data->date = $parameter['date'];
+                    $data->save();
+
+                    $a++;
+                }
+            }
+            // $total = 0;
+
+            // $ExcelDataLatih = [];
+            // $file = "D:\Naive Bayes per cordinat.xlsx"; 
+            // $reader = ReaderFactory::create(Type::XLSX);
+            // $reader->open($file);
+            
+            // foreach ($reader->getSheetIterator() as $sheet) {
+            //     $dataExcel = $this->readOrderSheet($sheet);
+            //     array_push($ExcelDataLatih,$dataExcel);
+            // }   
+            
+            // $reader->close();
+
+            // for ($i=0; $i < count($valueData['vHulu']) ; $i++) { 
+            //     if(strtolower($valueData['vHulu'][$i]['status']['text']) == strtolower($ExcelDataLatih[1][$i+1][6])){
+            //         $total++;
+            //     }
+            //     // echo strtolower($valueData['vHulu'][$i]['status']['text'])." = ";
+            //     // echo strtolower($ExcelDataLatih[1][$i+1][6])."\n";
+            // }
+            
+            // // var_dump($total);
+            // $valueData['akurasi'] = $total/count($valueData['vHulu']);
+
+            // dd($valueData);
+            return view('naiveBayes',$valueData);
+        }else{
+            return redirect('bencana');
+        }
+    }
+    public function importDataLatih(Request $request){
+        $datasExcel = [];
+        
+        $parameterProbabilitas = array(
+            'aman' => array(),
+            'rawan' => array(),
+            'paramSoil' => array(),
+            'paramSlope' => array(),
+            'paramRainfall' => array(),
+        );
+
+        $location = LocationModel::get();
+
+        if(Input::hasFile('import_files')){
+            $file = Input::file('import_files'); 
+            $reader = ReaderFactory::create(Type::XLSX);
+            foreach ($file as $files) {
+                $reader->open($files->path());
+                foreach ($reader->getSheetIterator() as $sheet) {
+                    $dataExcel = $this->readOrderSheet($sheet);
+                    array_push($datasExcel,$dataExcel);
+                }   
+            }
+            $reader->close();
+            
+            $a = 0;
+            for ($i=0; $i < count($dataExcel) ; $i++) { 
+                if($i != 0){
+                    if($a <= count($location)){
+                        $data = New ParameterModel;
+                        $data->rainfall = $dataExcel[$i][0];
+                        $data->soil = $dataExcel[$i][1];
+                        $data->slope = $dataExcel[$i][2];
+                        $data->status = $dataExcel[$i][3];
+                        $data->location_id = $location[$a]->id;
+                        $data->date = date('Y-m-d H:i:s');
+                        $data->save();
+                        $a++;
+                    }
+
+                }
+            }
+
+            $parameter = array(
+                'rainfall' =>  0,
+                'soil' => 'AN',
+                'slope' => 0,
+                'location_id' => $location[$a]->id,
+                'date'=> date('Y-m-d H:i:s'),
+                'status' => '',
+            );
+            $max_id = ParameterModel::max('id');
+            $min_id = ParameterModel::min('id');
+            
+
+            $parameter['status'] = $this->NaiveBayes($parameter,$parameterProbabilitas,$min_id,$max_id);
+
+            $dataModel = New ModelModel;
+            $dataModel->name = $max_id;
+            $dataModel->max_id = $max_id;
+            $dataModel->min_id = $min_id;
+            $dataModel->date = date('Y-m-d H:i:s');
+            $dataModel->praman = count($parameter["status"]["Rawan"])/(count($parameter["status"]["Aman"])+count($parameter["status"]["Rawan"]));
+            $dataModel->prrawan = count($parameter["status"]["Aman"])/(count($parameter["status"]["Aman"])+count($parameter["status"]["Rawan"]));
+            $dataModel->hrr = $parameter["status"]["paramRainfall"]["rendah"]["prob_rawan"];
+            $dataModel->hra = $parameter["status"]["paramRainfall"]["rendah"]["prob_aman"];
+            $dataModel->hsr = $parameter["status"]["paramRainfall"]["sedang"]["prob_rawan"];
+            $dataModel->hsa = $parameter["status"]["paramRainfall"]["sedang"]["prob_aman"];
+            $dataModel->htr = $parameter["status"]["paramRainfall"]["tinggi"]["prob_rawan"];
+            $dataModel->hta = $parameter["status"]["paramRainfall"]["tinggi"]["prob_aman"];
+            $dataModel->klr = $parameter["status"]["paramSlope"]["landai"]["prob_rawan"];
+            $dataModel->kla = $parameter["status"]["paramSlope"]["landai"]["prob_aman"];
+            $dataModel->ksr = $parameter["status"]["paramSlope"]["sedang"]["prob_rawan"];
+            $dataModel->ksa = $parameter["status"]["paramSlope"]["sedang"]["prob_aman"];
+            $dataModel->kcr = $parameter["status"]["paramSlope"]["curam"]["prob_rawan"];
+            $dataModel->kca = $parameter["status"]["paramSlope"]["curam"]["prob_aman"];
+            $dataModel->snr = $parameter["status"]["paramSoil"]["AN"]["prob_rawan"];
+            $dataModel->sna = $parameter["status"]["paramSoil"]["AN"]["prob_aman"];
+            $dataModel->srr = $parameter["status"]["paramSoil"]["AR"]["prob_rawan"];
+            $dataModel->sra = $parameter["status"]["paramSoil"]["AR"]["prob_aman"];
+            
+            $dataModel->save();
+            return redirect('bencana/config');
+            // dd($data);
+        }else{
+            return redirect('bencana/config');
+        }
+    }
+    public function NaiveBayes($dataUji,$parameterProbabilitas,$minId,$maxId){
+
+        $paramRainfall = array(
+            'rendah' => array(
+                'aman' => array(),
+                'rawan' => array(),
+                'prob_aman'=> 0,
+                'prob_rawan'=> 0,
+            ),
+            'sedang' => array(
+                'aman' => array(),
+                'rawan' => array(),
+                'prob_aman'=> 0,
+                'prob_rawan'=> 0,
+            ),
+            'tinggi' => array(
+                'aman' => array(),
+                'rawan' => array(),
+                'prob_aman'=> 0,
+                'prob_rawan'=> 0,
+            ),
+        );
+        $paramSlope = array(
+            'landai' => array(
+                'aman' => array(),
+                'rawan' => array(),
+                'prob_aman'=> 0,
+                'prob_rawan'=> 0,
+            ),
+            'sedang' => array(
+                'aman' => array(),
+                'rawan' => array(),
+                'prob_aman'=> 0,
+                'prob_rawan'=> 0,
+            ),
+            'curam' => array(
+                'aman' => array(),
+                'rawan' => array(),
+                'prob_aman'=> 0,
+                'prob_rawan'=> 0,
+            ),
+        );
+        $paramSoil = array(
+            'AR' => array(
+                'aman' => array(),
+                'rawan' => array(),
+                'prob_aman'=> 0,
+                'prob_rawan'=> 0,
+            ),
+            'AN' => array(
+                'aman' => array(),
+                'rawan' => array(),
+                'prob_aman'=> 0,
+                'prob_rawan'=> 0,
+            ),
+        );
+
+        if(empty($parameterProbabilitas['paramRainfall']) && empty($parameterProbabilitas['paramSlope']) && empty($parameterProbabilitas['paramSoil'])){
+            $dataLatih = [];
+
+            $data = ParameterModel::whereBetween('id',[$minId,$maxId])->get();
+            $aman = ParameterModel::whereBetween('id',[$minId,$maxId])->where('status','aman')->get();
+            $rawan = ParameterModel::whereBetween('id',[$minId,$maxId])->where('status','rawan')->get();
+            // dd($rawan);
+
+            foreach ($data as $key) {
+                $rainfall = $this->rescale_rain($key->rainfall);
+                
+                $slope = $this->rescale_slope($key->slope);
+    
+                $params = array(
+                    'v_rainfall' => $key->rainfall,
+                    'rainfall' => $rainfall,
+                    'v_slope' => $key->slope,
+                    'slope' => $slope,
+                    'soil' => $key->soil,
+                    'area_id' => $key->area_id,
+                    'status' => $key->status,
+                    'date' => $key->date
+                );
+    
+                if($params['rainfall'] == 'RENDAH'){
+                    if($params['status'] == 'AMAN'){
+                        array_push($paramRainfall['rendah']['aman'],$params);
+                    }else{
+                        array_push($paramRainfall['rendah']['rawan'],$params);
+                    }
+                }elseif ($params['rainfall'] == 'SEDANG') {
+                    if($params['status'] == 'AMAN'){
+                        array_push($paramRainfall['sedang']['aman'],$params);
+                    }else{
+                        array_push($paramRainfall['sedang']['rawan'],$params);
+                    }
+                }else{
+                    if($params['status'] == 'AMAN'){
+                        array_push($paramRainfall['tinggi']['aman'],$params);
+                    }else{
+                        array_push($paramRainfall['tinggi']['rawan'],$params);
+                    }
+                }
+    
+                if($params['slope'] == 'LANDAI'){
+                    if($params['status'] == 'AMAN'){
+                        array_push($paramSlope['landai']['aman'],$params);
+                    }else{
+                        array_push($paramSlope['landai']['rawan'],$params);
+                    }
+                }elseif ($params['slope'] == 'SEDANG') {
+                    if($params['status'] == 'AMAN'){
+                        array_push($paramSlope['sedang']['aman'],$params);
+                    }else{
+                        array_push($paramSlope['sedang']['rawan'],$params);
+                    }
+                }else{
+                    if($params['status'] == 'AMAN'){
+                        array_push($paramSlope['curam']['aman'],$params);
+                    }else{
+                        array_push($paramSlope['curam']['rawan'],$params);
+                    }
+                }
+    
+                if($params['soil'] == 'AR'){
+                    if($params['status'] == 'AMAN'){
+                        array_push($paramSoil['AR']['aman'],$params);
+                    }else{
+                        array_push($paramSoil['AR']['rawan'],$params);
+                    }
+                }else{
+                    if($params['status'] == 'AMAN'){
+                        array_push($paramSoil['AN']['aman'],$params);
+                    }else{
+                        array_push($paramSoil['AN']['rawan'],$params);
+                    }
+                }
+                array_push($dataLatih,$params);
+
+                $paramRainfall['rendah']['prob_aman'] = count($paramRainfall['rendah']['aman'])/count($aman);
+                $paramRainfall['rendah']['prob_rawan'] = count($paramRainfall['rendah']['rawan'])/count($rawan);
+                $paramRainfall['sedang']['prob_aman'] = count($paramRainfall['sedang']['aman'])/count($rawan);
+                $paramRainfall['sedang']['prob_rawan'] = count($paramRainfall['sedang']['rawan'])/count($rawan);
+                $paramRainfall['tinggi']['prob_aman'] = count($paramRainfall['tinggi']['aman'])/count($aman);
+                $paramRainfall['tinggi']['prob_rawan'] = count($paramRainfall['tinggi']['rawan'])/count($rawan);
+
+                $paramSlope['landai']['prob_aman'] = count($paramSlope['landai']['aman'])/count($aman);
+                $paramSlope['landai']['prob_rawan'] = count($paramSlope['landai']['rawan'])/count($rawan);
+                $paramSlope['sedang']['prob_aman'] = count($paramSlope['sedang']['aman'])/count($aman);
+                $paramSlope['sedang']['prob_rawan'] = count($paramSlope['sedang']['rawan'])/count($rawan);
+                $paramSlope['curam']['prob_aman'] = count($paramSlope['curam']['aman'])/count($aman);
+                $paramSlope['curam']['prob_rawan'] = count($paramSlope['curam']['rawan'])/count($rawan);
+
+                $paramSoil['AR']['prob_aman'] = count($paramSoil['AR']['aman'])/count($aman);
+                $paramSoil['AR']['prob_rawan'] = count($paramSoil['AR']['rawan'])/count($rawan);
+                $paramSoil['AN']['prob_aman'] = count($paramSoil['AN']['aman'])/count($aman);
+                $paramSoil['AN']['prob_rawan'] = count($paramSoil['AN']['rawan'])/count($aman);
+
+            }
+        }else{
+            $paramRainfall = $parameterProbabilitas['paramRainfall'];
+            $paramSlope = $parameterProbabilitas['paramSlope'];
+            $paramSoil = $parameterProbabilitas['paramSoil'];
+            $aman = $parameterProbabilitas['aman'];
+            $rawan =$parameterProbabilitas['rawan'];
+        }
+
+        $dataUji['rainfall'] = $this->rescale_rain($dataUji['rainfall']);
+        $dataUji['slope'] = $this->rescale_slope($dataUji['slope']); 
+
+        $rainRawan = $paramRainfall[strtolower($dataUji['rainfall'])]['prob_rawan'];
+        $rainAman =  $paramRainfall[strtolower($dataUji['rainfall'])]['prob_aman'];
+        $slopeRawan = $paramSlope[strtolower($dataUji['slope'])]['prob_rawan'];
+        $slopeAman = $paramSlope[strtolower($dataUji['slope'])]['prob_aman'];
+        $soilRawan = $paramSoil[$dataUji['soil']]['prob_rawan'];
+        $soilAman = $paramSoil[$dataUji['soil']]['prob_aman'];
+        
+        // var_dump(count($paramRainfall['tinggi']['aman']));
+        // var_dump($soilRawan);
+        
+        $pAman = ($rainAman * $slopeAman * $soilAman * (count($aman) / (count($aman) + count($rawan))));
+        $pRawan = ($rainRawan * $slopeRawan * $soilRawan * (count($aman) / (count($aman) + count($rawan))));
+        
+        $max = max($pAman,$pRawan);
+
+        // var_dump($pRawan);
+        if($max == $pAman){
+            $returnVal = array(
+                'text' => 'Aman', 
+                'value' => $pAman,
+                'RescaleRainfall' =>$dataUji['rainfall'],
+                'RescaleSlope' =>$dataUji['slope'],
+                'RainRawan' => $rainRawan,
+                'RawainAman'=> $rainAman,
+                'SlopeRawan' => $slopeRawan,
+                'SlopeAman' => $slopeAman,
+                'SoilRawan' => $soilRawan,
+                'SoilAman' => $soilAman,
+                'pAman' => $pAman,
+                'pRawan' => $pRawan, 
+                'paramRainfall' =>  $paramRainfall,
+                'paramSlope' =>  $paramSlope,
+                'paramSoil' =>  $paramSoil,
+                'Aman' => $aman,
+                'Rawan' => $rawan,
+            );
+            return $returnVal;
+        }else if($max == $pRawan){
+            $returnVal = array(
+                'text' => 'Rawan', 
+                'value' => $pRawan,
+                'RescaleRainfall' =>$dataUji['rainfall'],
+                'RescaleSlope' =>$dataUji['slope'],
+                'RainRawan' => $rainRawan,
+                'RawainAman'=> $rainAman,
+                'SlopeRawan' => $slopeRawan,
+                'SlopeAman' => $slopeAman,
+                'SoilRawan' => $soilRawan,
+                'SoilAman' => $soilAman,
+                'pAman' => $pAman,
+                'pRawan' => $pRawan,
+                'paramRainfall' =>  $paramRainfall,
+                'paramSlope' =>  $paramSlope,
+                'paramSoil' =>  $paramSoil,
+                'Aman' => $aman,
+                'Rawan' => $rawan,
+            );
+            return $returnVal;
+        }else{
+            return false;
+        }
+    }
+    public function rescale_rain($param){
+        if($param < 27.16666667){
+            return 'RENDAH';
+        }elseif ($param > 27.16666667 && $param <= 54.33333333) {
+            return 'SEDANG';
+        }else{
+            return 'TINGGI';
+        }
+    }
+    public function rescale_slope($param){
+        if($param <= 0.244307993){
+            return 'LANDAI';
+        }elseif ($param > 0.244307993 && $param <= 0.446153997) {
+            return 'SEDANG';
+        }else{
+            return 'CURAM';
+        }
+    }
+    public function readOrderSheet($sheet){
+        $data = [];
+        foreach ($sheet->getRowIterator() as $idx => $row) {
+         array_push($data,$row);
+        }
+        return $data;
+    }
+    public function maps(){
+        $area = AreaModel::all();
+        
+        $location = LocationModel::with(['paramsNaiveBayes' => function($q){$q->orderBy('id','DESC');}])->get();
+
+        if(count($location[0]->paramsNaiveBayes) <= 0 ){
+            $location = LocationModel::with(['params' => function($q){$q->orderBy('id','DESC');}])->get();
+        }
+
+        
+        Mapper::map(-7.642431,110.457015,['zoom' =>12, 'marker' => false, 'eventBeforeLoad' => 'addEventListener(map);']);
+        // dd($location[166]);
+        foreach ($location as $key) {
+            // var_dump($key);
+            if(count($key->paramsNaiveBayes) || count($key->params)){
+                if(count($key->paramsNaiveBayes) <= 0){
+                    $date = $key->params[0]->date;
+                    $status = $key->params[0]->status;
+                    $slope =  $key->params[0]->slope;
+                    $rainfall = $key->params[0]->rainfall;
+                    $soil = $key->params[0]->soil;
+
+                }else{
+                    $date = $key->paramsNaiveBayes[0]->date;
+                    $status = $key->paramsNaiveBayes[0]->status;
+                    $slope =  $key->paramsNaiveBayes[0]->slope;
+                    $rainfall = $key->paramsNaiveBayes[0]->rainfall;
+                    $soil = $key->paramsNaiveBayes[0]->soil;
+                }
+
+                if($status == 'Aman'){
+                    $icon = URL::to('/').'/save.png';
+                }else{
+                    $icon = URL::to('/').'/warning.png';
+                }
+
+                $html = '<div class="container-fluid">
+                            <div class="row">
+                                <div class="col-md-12">
+                                    <div class="row">
+                                        <div class="col-md-3">
+                                            <h5 class="text-left">
+                                                '.$key->id.'
+                                            </h5>
+                                        </div>
+                                        <div class="col-md-9">
+                                            <p class="text-left">
+                                                '.$date.'
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <table class="table table-hover table-sm">
+                                        <tbody>
+                                            <tr>
+                                                <td>
+                                                    Latitude
+                                                </td>
+                                                <td>
+                                                    '.$key->latitude.'
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td>
+                                                    Longitude
+                                                </td>
+                                                <td>
+                                                    '.$key->longitude.'
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td>
+                                                    Slope
+                                                </td>
+                                                <td>
+                                                    '.$slope.'
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td>
+                                                    Rain Fall
+                                                </td>
+                                                <td>
+                                                    '.$rainfall.'
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td>
+                                                    soil
+                                                </td>
+                                                <td>
+                                                    '.$soil.'
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td>
+                                                    Status
+                                                </td>
+                                                <td>
+                                                    '.$status.'
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>';
+
+                Mapper::informationWindow(
+                    $key->latitude,
+                    $key->longitude, 
+                    $html, 
+                    [
+                        'open' => false, 
+                        'maxWidth'=> 500,
+                        'icon' =>  $icon, 
+                        'markers' => 
+                            [
+                                'title' => 'Title',
+                            ]
+                    ]
+                );
+            }                
+        }
+        
+        // dd($location[0]);
+        return view('map');
+    }
+    public function dataLatih(){
+        return view('config');
+    }
+    public function detailDatalatih($id){
+        $data = ModelModel::where('id',$id)->first();
+        if(!empty($data)){
+            return view('detailDatalatih',$data);
+        }else{
+            $this->dataLatih();
+        }
+    }
+    public function dataTablesLatih(){
+        $datas = ParameterModel::all();
+        // dd(Datatables::of($datas)->make(true));
+        return Datatables::of($datas)->make(true);
+    }
+    public function dataTablesModel(){
+        $datas = ModelModel::all();
+        // dd(Datatables::of($datas)->make(true));
+        return Datatables::of($datas)
+        ->addColumn('detail_url', function ($datas) {
+            return route('bencana.detaildatalatih', ['id' => $datas->id]);
+        })
+        ->make(true);
+    }
+    public function dataTableDetailDataLatih($id_model){
+        $model = ModelModel::where('id',$id_model)->first();
+        $datas = ParameterModel::whereBetween('id',[$model->min_id,$model->max_id]);
+        // dd(Datatables::of($datas)->make(true));
+        return Datatables::of($datas)->make(true);
+    }
+    public function loadData(){
+        $datasExcel = [];
+        // $file = "D:\LatLong.xlsx";
+        $file = "D:\Naive Bayes per cordinat.xlsx"; 
+        $reader = ReaderFactory::create(Type::XLSX );
+        $reader->open($file);
+            foreach ($reader->getSheetIterator() as $sheet) {
+                $dataExcel = $this->readOrderSheet($sheet);
+                array_push($datasExcel,$dataExcel);
+            }   
+        var_dump($datasExcel[1][1]);
+        $reader->close();
+        for ($i=0; $i < count($datasExcel[1]) ; $i++) { 
+            if($i > 18000){
+                $date_split = explode("_",$datasExcel[1][$i][0])[1];
+                $date = $date_split[0].$date_split[1].$date_split[2].$date_split[3].'-'.$date_split[4].$date_split[5].'-'.$date_split[6].$date_split[7];
+                var_dump($i);
+                $data = New ParameterModel;
+                $data->rainfall = $datasExcel[1][$i][1];
+                $data->soil = $datasExcel[1][$i][3];
+                $data->slope = $datasExcel[1][$i][2];
+                $data->date = $date;
+                $data->status = $datasExcel[1][$i][6];
+                $data->location_id = $datasExcel[1][$i][7];
+                $data->save();
+            }else{
+                echo "1 \n";
+            }
+        }
+        // var_dump($dataExcel[0]);      
+    }
+    function load_data_new(){
+       
+
+        $datasExcel = [];
+        $dataExportExcelFull = [];
+        
+        $fileName = 'Export Excel.xlsx';
 
         $parameHulu = array(
             array(190,234),
@@ -300,3077 +973,15 @@ class BencanaController extends Controller
             array(215,240),
          );
 
-        $parameTengah = array(
-            array(190,234),
-            array(190,235),
-            array(190,236),
-
-            array(191,234),
-            array(191,235),
-            array(191,236),
-            
-            array(192,234),
-            array(192,235),
-            array(192,236),
-            array(192,237),
-            
-            
-            array(193,234),
-            array(193,235),
-            array(193,236),
-            array(193,237),
-            
-            array(194,234),
-            array(194,235),
-            array(194,236),
-            array(194,237),
-            
-            
-            array(195,234),
-            array(195,235),
-            array(195,236),
-            array(195,237),
-            array(195,238),
-            
-            array(196,234),
-            array(196,235),
-            array(196,236),
-            array(196,237),
-            array(196,238),
-            
-            
-            array(197,234),
-            array(197,235),
-            array(197,236),
-            array(197,237),
-            array(197,238),
-            array(197,239),
-            
-            array(198,234),
-            array(198,235),
-            array(198,236),
-            array(198,237),
-            array(198,238),
-            array(198,239),
-            
-            array(199,234),
-            array(199,235),
-            array(199,236),
-            array(199,237),
-            array(199,238),
-            array(199,239),
-            array(199,240),
-            
-            array(200,234),
-            array(200,235),
-            array(200,236),
-            array(200,237),
-            array(200,238),
-            array(200,239),
-            array(200,240),
-            
-            
-            array(201,234),
-            array(201,235),
-            array(201,236),
-            array(201,237),
-            array(201,238),
-            array(201,239),
-            array(201,240),
-            
-            array(202,234),
-            array(202,235),
-            array(202,236),
-            array(202,237),
-            array(202,238),
-            array(202,239),
-            array(202,240),
-            
-            
-            array(203,234),
-            array(203,235),
-            array(203,236),
-            array(203,237),
-            array(203,238),
-            array(203,239),
-            array(203,240),
-            array(203,241),
-            
-            
-            array(204,234),
-            array(204,235),
-            array(204,236),
-            array(204,237),
-            array(204,238),
-            array(204,239),
-            array(204,240),
-            array(204,241),
-            
-            array(205,233),
-            array(205,234),
-            array(205,235),
-            array(205,236),
-            array(205,237),
-            array(205,238),
-            array(205,239),
-            array(205,240),
-            array(205,241),
-            
-            array(206,234),
-            array(206,235),
-            array(206,236),
-            array(206,237),
-            array(206,238),
-            array(206,239),
-            array(206,240),
-            array(206,241),
-            
-            array(207,234),
-            array(207,235),
-            array(207,236),
-            array(207,237),
-            array(207,238),
-            array(207,239),
-            array(207,240),
-            array(207,241),
-            
-            
-            array(208,234),
-            array(208,235),
-            array(208,236),
-            array(208,237),
-            array(208,238),
-            array(208,239),
-            array(208,240),
-            array(208,241),
-            array(208,242),
-            
-            
-            array(209,234),
-            array(209,235),
-            array(209,236),
-            array(209,237),
-            array(209,238),
-            array(209,239),
-            array(209,240),
-            array(209,241),
-            array(209,242),
-            
-            
-            array(210,235),
-            array(210,236),
-            array(210,237),
-            array(210,238),
-            array(210,239),
-            array(210,240),
-            array(210,241),
-            array(210,242),
-            
-            array(211,235),
-            array(211,236),
-            array(211,237),
-            array(211,238),
-            array(211,239),
-            array(211,240),
-            array(211,241),
-            array(211,242),
-            
-            array(212,235),
-            array(212,236),
-            array(212,237),
-            array(212,238),
-            array(212,239),
-            array(212,240),
-            array(212,241),
-            array(212,242),
-            
-            array(213,235),
-            array(213,236),
-            array(213,237),
-            array(213,238),
-            array(213,239),
-            array(213,240),
-            array(213,241),
-            array(213,242),
-            array(213,243),
-            
-            array(214,235),
-            array(214,236),
-            array(214,237),
-            array(214,238),
-            array(214,239),
-            array(214,240),
-            array(214,241),
-            array(214,242),
-            array(214,243),
-            
-            array(215,235),
-            array(215,236),
-            array(215,237),
-            array(215,238),
-            array(215,239),
-            array(215,240),
-            array(215,241),
-            array(215,242),
-            array(215,243),
-            
-            array(216,236),
-            array(216,237),
-            array(216,238),
-            array(216,239),
-            array(216,240),
-            array(216,241),
-            array(216,242),
-            array(216,243),
-            array(216,244),
-
-            array(217,237),
-            array(217,238),
-            array(217,239),
-            array(217,240),
-            array(217,241),
-            array(217,242),
-            array(217,243),
-            array(217,244),
-
-            array(218,237),
-            array(218,238),
-            array(218,239),
-            array(218,240),
-            array(218,241),
-            array(218,242),
-            array(218,243),
-            array(218,244),
-            
-
-            array(219,237),
-            array(219,238),
-            array(219,239),
-            array(219,240),
-            array(219,241),
-            array(219,242),
-            array(219,243),
-            array(219,244),
-            array(219,245),
-            
-
-            array(220,237),
-            array(220,238),
-            array(220,239),
-            array(220,240),
-            array(220,241),
-            array(220,242),
-            array(220,243),
-            array(220,244),
-            array(220,245),
-            array(220,246),
-            
-            array(221,237),
-            array(221,238),
-            array(221,239),
-            array(221,240),
-            array(221,241),
-            array(221,242),
-            array(221,243),
-            array(221,244),
-            array(221,245),
-            array(221,246),
-
-            array(222,238),
-            array(222,239),
-            array(222,240),
-            array(222,241),
-            array(222,242),
-            array(222,243),
-            array(222,244),
-            array(222,245),
-            array(222,246),
-
-            array(223,238),
-            array(223,239),
-            array(223,240),
-            array(223,241),
-            array(223,242),
-            array(223,243),
-            array(223,244),
-            array(223,245),
-            array(223,246),
-
-            array(224,238),
-            array(224,239),
-            array(224,240),
-            array(224,241),
-            array(224,242),
-            array(224,243),
-            array(224,244),
-            array(224,245),
-            array(224,246),
-            
-            
-            array(225,238),
-            array(225,239),
-            array(225,240),
-            array(225,241),
-            array(225,242),
-            array(225,243),
-            array(225,244),
-            array(225,245),
-            array(225,246),
-            array(225,247),
-
-            array(226,238),
-            array(226,239),
-            array(226,240),
-            array(226,241),
-            array(226,242),
-            array(226,243),
-            array(226,244),
-            array(226,245),
-            array(226,246),
-            array(226,247),
-
-            array(227,238),
-            array(227,239),
-            array(227,240),
-            array(227,241),
-            array(227,242),
-            array(227,243),
-            array(227,244),
-            array(227,245),
-            array(227,246),
-            array(227,247),
-            
-            
-
-            array(228,239),
-            array(228,240),
-            array(228,241),
-            array(228,242),
-            array(228,243),
-            array(228,244),
-            array(228,245),
-            array(228,246),
-            array(228,247),
-            array(228,248),
-            array(228,249),
-
-            array(229,239),
-            array(229,240),
-            array(229,241),
-            array(229,242),
-            array(229,243),
-            array(229,244),
-            array(229,245),
-            array(229,246),
-            array(229,247),
-            array(229,248),
-            array(229,249),
-
-            array(230,239),
-            array(230,240),
-            array(230,241),
-            array(230,242),
-            array(230,243),
-            array(230,244),
-            array(230,245),
-            array(230,246),
-            array(230,247),
-            array(230,248),
-            array(230,249),
-
-            array(231,241),
-            array(231,242),
-            array(231,243),
-            array(231,244),
-            array(231,245),
-            array(231,246),
-            array(231,247),
-            array(231,248),
-            array(231,249),
-            
-
-            array(232,241),
-            array(232,242),
-            array(232,243),
-            array(232,244),
-            array(232,245),
-            array(232,246),
-            array(232,247),
-            array(232,248),
-            array(232,249),
-            array(232,250),
-
-            
-            array(233,241),
-            array(233,242),
-            array(233,243),
-            array(233,244),
-            array(233,245),
-            array(233,246),
-            array(233,247),
-            array(233,248),
-            array(233,249),
-            array(233,250),
-
-            array(234,241),
-            array(234,242),
-            array(234,243),
-            array(234,244),
-            array(234,245),
-            array(234,246),
-            array(234,247),
-            array(234,248),
-            array(234,249),
-            array(234,250),
-            
-
-            array(235,241),
-            array(235,242),
-            array(235,243),
-            array(235,244),
-            array(235,245),
-            array(235,246),
-            array(235,247),
-            array(235,248),
-            array(235,249),
-            array(235,250),
-            array(235,251),
-
-            array(236,241),
-            array(236,242),
-            array(236,243),
-            array(236,244),
-            array(236,245),
-            array(236,246),
-            array(236,247),
-            array(236,248),
-            array(236,249),
-            array(236,250),
-            array(236,251),
-            
-
-            array(237,241),
-            array(237,242),
-            array(237,243),
-            array(237,244),
-            array(237,245),
-            array(237,246),
-            array(237,247),
-            array(237,248),
-            array(237,249),
-            array(237,250),
-            array(237,251),
-            array(237,252),
-
-            array(238,242),
-            array(238,243),
-            array(238,244),
-            array(238,245),
-            array(238,246),
-            array(238,247),
-            array(238,248),
-            array(238,249),
-            array(238,250),
-            array(238,251),
-            array(238,252),
-            
-
-            array(239,243),
-            array(239,244),
-            array(239,245),
-            array(239,246),
-            array(239,247),
-            array(239,248),
-            array(239,249),
-            array(239,250),
-            array(239,251),
-            array(239,252),
-            array(239,253),
-
-            array(240,243),
-            array(240,244),
-            array(240,245),
-            array(240,246),
-            array(240,247),
-            array(240,248),
-            array(240,249),
-            array(240,250),
-            array(240,251),
-            array(240,252),
-            array(240,253),
-
-            
-            array(241,243),
-            array(241,244),
-            array(241,245),
-            array(241,246),
-            array(241,247),
-            array(241,248),
-            array(241,249),
-            array(241,250),
-            array(241,251),
-            array(241,252),
-            array(241,253),
-            array(241,254),
-            
-            
-
-            array(242,242),
-            array(242,243),
-            array(242,244),
-            array(242,245),
-            array(242,246),
-            array(242,247),
-            array(242,248),
-            array(242,249),
-            array(242,250),
-            array(242,251),
-            array(242,252),
-            array(242,253),
-            array(242,254),
-            array(242,255),
-            array(242,256),
-
-            
-            array(243,242),
-            array(243,243),
-            array(243,244),
-            array(243,245),
-            array(243,246),
-            array(243,247),
-            array(243,248),
-            array(243,249),
-            array(243,250),
-            array(243,251),
-            array(243,252),
-            array(243,253),
-            array(243,254),
-            array(243,255),
-            array(243,256),
-            
-            
-
-            array(244,241),
-            array(244,242),
-            array(244,243),
-            array(244,244),
-            array(244,245),
-            array(244,246),
-            array(244,247),
-            array(244,248),
-            array(244,249),
-            array(244,250),
-            array(244,251),
-            array(244,252),
-            array(244,253),
-            array(244,254),
-            array(244,255),
-            array(244,256),
-            array(244,257),
-            array(244,258),
-
-            array(245,242),
-            array(245,243),
-            array(245,244),
-            array(245,245),
-            array(245,246),
-            array(245,247),
-            array(245,248),
-            array(245,249),
-            array(245,250),
-            array(245,251),
-            array(245,252),
-            array(245,253),
-            array(245,254),
-            array(245,255),
-            array(245,256),
-            array(245,257),
-            array(245,258),
-            
-
-            array(246,242),
-            array(246,243),
-            array(246,244),
-            array(246,245),
-            array(246,246),
-            array(246,247),
-            array(246,248),
-            array(246,249),
-            array(246,250),
-            array(246,251),
-            array(246,252),
-            array(246,253),
-            array(246,254),
-            array(246,255),
-            array(246,256),
-            array(246,257),
-            array(246,258),
-            array(246,259),
-
-            array(247,242),
-            array(247,243),
-            array(247,244),
-            array(247,245),
-            array(247,246),
-            array(247,247),
-            array(247,248),
-            array(247,249),
-            array(247,250),
-            array(247,251),
-            array(247,252),
-            array(247,253),
-            array(247,254),
-            array(247,255),
-            array(247,256),
-            array(247,257),
-            array(247,258),
-            array(247,259),
-
-            
-            array(248,242),
-            array(248,243),
-            array(248,244),
-            array(248,245),
-            array(248,246),
-            array(248,247),
-            array(248,248),
-            array(248,249),
-            array(248,250),
-            array(248,251),
-            array(248,252),
-            array(248,253),
-            array(248,254),
-            array(248,255),
-            array(248,256),
-            array(248,257),
-            array(248,258),
-            array(248,259),
-
-            array(249,242),
-            array(249,243),
-            array(249,244),
-            array(249,245),
-            array(249,246),
-            array(249,247),
-            array(249,248),
-            array(249,249),
-            array(249,250),
-            array(249,251),
-            array(249,252),
-            array(249,253),
-            array(249,254),
-            array(249,255),
-            array(249,256),
-            array(249,257),
-            array(249,258),
-            array(249,259),
-
-            array(250,242),
-            array(250,243),
-            array(250,244),
-            array(250,245),
-            array(250,246),
-            array(250,247),
-            array(250,248),
-            array(250,249),
-            array(250,250),
-            array(250,251),
-            array(250,252),
-            array(250,253),
-            array(250,254),
-            array(250,255),
-            array(250,256),
-            array(250,257),
-            array(250,258),
-            array(250,259),
-
-            array(251,242),
-            array(251,243),
-            array(251,244),
-            array(251,245),
-            array(251,246),
-            array(251,247),
-            array(251,248),
-            array(251,249),
-            array(251,250),
-            array(251,251),
-            array(251,252),
-            array(251,253),
-            array(251,254),
-            array(251,255),
-            array(251,256),
-            array(251,257),
-            array(251,258),
-            array(251,259),
-            array(251,260),
-
-            array(252,243),
-            array(252,244),
-            array(252,245),
-            array(252,246),
-            array(252,247),
-            array(252,248),
-            array(252,249),
-            array(252,250),
-            array(252,251),
-            array(252,252),
-            array(252,253),
-            array(252,254),
-            array(252,255),
-            array(252,256),
-            array(252,257),
-            array(252,258),
-            array(252,259),
-            array(252,260),
-            
-            
-
-            array(253,243),
-            array(253,244),
-            array(253,245),
-            array(253,246),
-            array(253,247),
-            array(253,248),
-            array(253,249),
-            array(253,250),
-            array(253,251),
-            array(253,252),
-            array(253,253),
-            array(253,254),
-            array(253,255),
-            array(253,256),
-            array(253,257),
-            array(253,258),
-            array(253,259),
-            array(253,260),
-            array(253,261),
-            array(253,262),
-
-            array(254,244),
-            array(254,245),
-            array(254,246),
-            array(254,247),
-            array(254,248),
-            array(254,249),
-            array(254,250),
-            array(254,251),
-            array(254,252),
-            array(254,253),
-            array(254,254),
-            array(254,255),
-            array(254,256),
-            array(254,257),
-            array(254,258),
-            array(254,259),
-            array(254,260),
-            array(254,261),
-            array(254,262),
-            array(254,263),
-
-            array(255,244),
-            array(255,245),
-            array(255,246),
-            array(255,247),
-            array(255,248),
-            array(255,249),
-            array(255,250),
-            array(255,251),
-            array(255,252),
-            array(255,253),
-            array(255,254),
-            array(255,255),
-            array(255,256),
-            array(255,257),
-            array(255,258),
-            array(255,259),
-            array(255,260),
-            array(255,261),
-            array(255,262),
-            array(255,263),
-            array(255,264),
-
-            array(256,244),
-            array(256,245),
-            array(256,246),
-            array(256,247),
-            array(256,248),
-            array(256,249),
-            array(256,250),
-            array(256,251),
-            array(256,252),
-            array(256,253),
-            array(256,254),
-            array(256,255),
-            array(256,256),
-            array(256,257),
-            array(256,258),
-            array(256,259),
-            array(256,260),
-            array(256,261),
-            array(256,262),
-            array(256,263),
-            array(256,264),
-
-            array(257,245),
-            array(257,246),
-            array(257,247),
-            array(257,248),
-            array(257,249),
-            array(257,250),
-            array(257,251),
-            array(257,252),
-            array(257,253),
-            array(257,254),
-            array(257,255),
-            array(257,256),
-            array(257,257),
-            array(257,258),
-            array(257,259),
-            array(257,260),
-            array(257,261),
-            array(257,262),
-            array(257,263),
-            array(257,264),
-
-            array(258,245),
-            array(258,246),
-            array(258,247),
-            array(258,248),
-            array(258,249),
-            array(258,250),
-            array(258,251),
-            array(258,252),
-            array(258,253),
-            array(258,254),
-            array(258,255),
-            array(258,256),
-            array(258,257),
-            array(258,258),
-            array(258,259),
-            array(258,260),
-            array(258,261),
-            array(258,262),
-            array(258,263),
-            array(258,264),
-            array(258,265),
-            array(258,266),
-
-            array(259,245),
-            array(259,246),
-            array(259,247),
-            array(259,248),
-            array(259,249),
-            array(259,250),
-            array(259,251),
-            array(259,252),
-            array(259,253),
-            array(259,254),
-            array(259,255),
-            array(259,256),
-            array(259,257),
-            array(259,258),
-            array(259,259),
-            array(259,260),
-            array(259,261),
-            array(259,262),
-            array(259,263),
-            array(259,264),
-            array(259,265),
-            array(259,266),
-
-            array(260,245),
-            array(260,246),
-            array(260,247),
-            array(260,248),
-            array(260,249),
-            array(260,250),
-            array(260,251),
-            array(260,252),
-            array(260,253),
-            array(260,254),
-            array(260,255),
-            array(260,256),
-            array(260,257),
-            array(260,258),
-            array(260,259),
-            array(260,260),
-            array(260,261),
-            array(260,262),
-            array(260,263),
-            array(260,264),
-            array(260,265),
-            array(260,266),
-
-            array(261,245),
-            array(261,246),
-            array(261,247),
-            array(261,248),
-            array(261,249),
-            array(261,250),
-            array(261,251),
-            array(261,252),
-            array(261,253),
-            array(261,254),
-            array(261,255),
-            array(261,256),
-            array(261,257),
-            array(261,258),
-            array(261,259),
-            array(261,260),
-            array(261,261),
-            array(261,262),
-            array(261,263),
-            array(261,264),
-            array(261,265),
-            array(261,266),
-            array(261,267),
-
-            array(262,245),
-            array(262,246),
-            array(262,247),
-            array(262,248),
-            array(262,249),
-            array(262,250),
-            array(262,251),
-            array(262,252),
-            array(262,253),
-            array(262,254),
-            array(262,255),
-            array(262,256),
-            array(262,257),
-            array(262,258),
-            array(262,259),
-            array(262,260),
-            array(262,261),
-            array(262,262),
-            array(262,263),
-            array(262,264),
-            array(262,265),
-            array(262,266),
-            array(262,267),
-
-            array(263,245),
-            array(263,246),
-            array(263,247),
-            array(263,248),
-            array(263,249),
-            array(263,250),
-            array(263,251),
-            array(263,252),
-            array(263,253),
-            array(263,254),
-            array(263,255),
-            array(263,256),
-            array(263,257),
-            array(263,258),
-            array(263,259),
-            array(263,260),
-            array(263,261),
-            array(263,262),
-            array(263,263),
-            array(263,264),
-            array(263,265),
-            array(263,266),
-            array(263,267),
-
-            array(264,246),
-            array(264,247),
-            array(264,248),
-            array(264,249),
-            array(264,250),
-            array(264,251),
-            array(264,252),
-            array(264,253),
-            array(264,254),
-            array(264,255),
-            array(264,256),
-            array(264,257),
-            array(264,258),
-            array(264,259),
-            array(264,260),
-            array(264,261),
-            array(264,262),
-            array(264,263),
-            array(264,264),
-            array(264,265),
-            array(264,266),
-            array(264,267),
-
-            array(265,246),
-            array(265,247),
-            array(265,248),
-            array(265,249),
-            array(265,250),
-            array(265,251),
-            array(265,252),
-            array(265,253),
-            array(265,254),
-            array(265,255),
-            array(265,256),
-            array(265,257),
-            array(265,258),
-            array(265,259),
-            array(265,260),
-            array(265,261),
-            array(265,262),
-            array(265,263),
-            array(265,264),
-            array(265,265),
-            array(265,266),
-            array(265,267),
-
-            array(266,246),
-            array(266,247),
-            array(266,248),
-            array(266,249),
-            array(266,250),
-            array(266,251),
-            array(266,252),
-            array(266,253),
-            array(266,254),
-            array(266,255),
-            array(266,256),
-            array(266,257),
-            array(266,258),
-            array(266,259),
-            array(266,260),
-            array(266,261),
-            array(266,262),
-            array(266,263),
-            array(266,264),
-            array(266,265),
-            array(266,266),
-            array(266,267),
-
-            array(267,247),
-            array(267,248),
-            array(267,249),
-            array(267,250),
-            array(267,251),
-            array(267,252),
-            array(267,253),
-            array(267,254),
-            array(267,255),
-            array(267,256),
-            array(267,257),
-            array(267,258),
-            array(267,259),
-            array(267,260),
-            array(267,261),
-            array(267,262),
-            array(267,263),
-            array(267,264),
-            array(267,265),
-            array(267,267),
-            array(266,267),
-
-            array(268,247),
-            array(268,248),
-            array(268,249),
-            array(268,250),
-            array(268,251),
-            array(268,252),
-            array(268,253),
-            array(268,254),
-            array(268,255),
-            array(268,256),
-            array(268,257),
-            array(268,258),
-            array(268,259),
-            array(268,260),
-            array(268,261),
-            array(268,262),
-            array(268,263),
-            array(268,264),
-            array(268,265),
-            array(268,266),
-            array(268,267),
-
-            array(269,247),
-            array(269,248),
-            array(269,249),
-            array(269,250),
-            array(269,251),
-            array(269,252),
-            array(269,253),
-            array(269,254),
-            array(269,255),
-            array(269,256),
-            array(269,257),
-            array(269,258),
-            array(269,259),
-            array(269,260),
-            array(269,261),
-            array(269,262),
-            array(269,263),
-            array(269,264),
-            array(269,265),
-            array(269,266),
-            array(269,267),
-
-            array(270,247),
-            array(270,248),
-            array(270,249),
-            array(270,250),
-            array(270,251),
-            array(270,252),
-            array(270,253),
-            array(270,254),
-            array(270,255),
-            array(270,256),
-            array(270,257),
-            array(270,258),
-            array(270,259),
-            array(270,260),
-            array(270,261),
-            array(270,262),
-            array(270,263),
-            array(270,264),
-            array(270,265),
-            array(270,266),
-            array(270,267),
-
-            array(271,248),
-            array(271,249),
-            array(271,250),
-            array(271,251),
-            array(271,252),
-            array(271,253),
-            array(271,254),
-            array(271,255),
-            array(271,256),
-            array(271,257),
-            array(271,258),
-            array(271,259),
-            array(271,260),
-            array(271,261),
-            array(271,262),
-            array(271,263),
-            array(271,264),
-            array(271,265),
-            array(271,266),
-
-            array(272,248),
-            array(272,249),
-            array(272,250),
-            array(272,251),
-            array(272,252),
-            array(272,253),
-            array(272,254),
-            array(272,255),
-            array(272,256),
-            array(272,257),
-            array(272,258),
-            array(272,259),
-            array(272,260),
-            array(272,261),
-            array(272,262),
-            array(272,263),
-            array(272,264),
-            array(272,265),
-
-            array(273,249),
-            array(273,250),
-            array(273,251),
-            array(273,252),
-            array(273,253),
-            array(273,254),
-            array(273,255),
-            array(273,256),
-            array(273,257),
-            array(273,258),
-            array(273,259),
-            array(273,260),
-            array(273,261),
-            array(273,262),
-            array(273,263),
-
-            array(274,250),
-            array(274,251),
-            array(274,252),
-            array(274,253),
-            array(274,254),
-            array(274,255),
-            array(274,256),
-            array(274,257),
-            array(274,258),
-            array(274,259),
-            array(274,260),
-            array(274,261),
-            array(274,262),
-
-            array(275,250),
-            array(275,251),
-            array(275,252),
-            array(275,253),
-            array(275,254),
-            array(275,255),
-            array(275,256),
-            array(275,257),
-            array(275,258),
-            array(275,259),
-            array(275,260),
-            array(275,261),
-
-            array(276,251),
-            array(276,252),
-            array(276,253),
-            array(276,254),
-            array(276,255),
-            array(276,256),
-            array(276,257),
-            array(276,258),
-
-         );
-
-        $paramHilir = array(
-            array(190,234),
-            array(190,235),
-            array(190,236),
-
-            array(191,234),
-            array(191,235),
-            array(191,236),
-            
-            array(192,234),
-            array(192,235),
-            array(192,236),
-            array(192,237),
-            
-            
-            array(193,234),
-            array(193,235),
-            array(193,236),
-            array(193,237),
-            
-            array(194,234),
-            array(194,235),
-            array(194,236),
-            array(194,237),
-            
-            
-            array(195,234),
-            array(195,235),
-            array(195,236),
-            array(195,237),
-            array(195,238),
-            
-            array(196,234),
-            array(196,235),
-            array(196,236),
-            array(196,237),
-            array(196,238),
-            
-            
-            array(197,234),
-            array(197,235),
-            array(197,236),
-            array(197,237),
-            array(197,238),
-            array(197,239),
-            
-            array(198,234),
-            array(198,235),
-            array(198,236),
-            array(198,237),
-            array(198,238),
-            array(198,239),
-            
-            
-            
-            array(199,234),
-            array(199,235),
-            array(199,236),
-            array(199,237),
-            array(199,238),
-            array(199,239),
-            array(199,240),
-            
-            array(200,234),
-            array(200,235),
-            array(200,236),
-            array(200,237),
-            array(200,238),
-            array(200,239),
-            array(200,240),
-            
-            array(201,234),
-            array(201,235),
-            array(201,236),
-            array(201,237),
-            array(201,238),
-            array(201,239),
-            array(201,240),
-            
-            array(202,234),
-            array(202,235),
-            array(202,236),
-            array(202,237),
-            array(202,238),
-            array(202,239),
-            array(202,240),
-            
-            array(203,234),
-            array(203,235),
-            array(203,236),
-            array(203,237),
-            array(203,238),
-            array(203,239),
-            array(203,240),
-            array(203,241),
-            
-            array(204,234),
-            array(204,235),
-            array(204,236),
-            array(204,237),
-            array(204,238),
-            array(204,239),
-            array(204,240),
-            array(204,241),
-            
-            array(205,233),
-            array(205,234),
-            array(205,235),
-            array(205,236),
-            array(205,237),
-            array(205,238),
-            array(205,239),
-            array(205,240),
-            array(205,241),
-            
-            array(206,234),
-            array(206,235),
-            array(206,236),
-            array(206,237),
-            array(206,238),
-            array(206,239),
-            array(206,240),
-            array(206,241),
-            
-            array(207,234),
-            array(207,235),
-            array(207,236),
-            array(207,237),
-            array(207,238),
-            array(207,239),
-            array(207,240),
-            array(207,241),
-            
-            array(208,234),
-            array(208,235),
-            array(208,236),
-            array(208,237),
-            array(208,238),
-            array(208,239),
-            array(208,240),
-            array(208,241),
-            array(208,242),
-            
-            array(209,234),
-            array(209,235),
-            array(209,236),
-            array(209,237),
-            array(209,238),
-            array(209,239),
-            array(209,240),
-            array(209,241),
-            array(209,242),
-            
-            array(210,235),
-            array(210,236),
-            array(210,237),
-            array(210,238),
-            array(210,239),
-            array(210,240),
-            array(210,241),
-            array(210,242),
-            
-            array(211,235),
-            array(211,236),
-            array(211,237),
-            array(211,238),
-            array(211,239),
-            array(211,240),
-            array(211,241),
-            array(211,242),
-            
-            array(212,235),
-            array(212,236),
-            array(212,237),
-            array(212,238),
-            array(212,239),
-            array(212,240),
-            array(212,241),
-            array(212,242),
-            
-            array(213,235),
-            array(213,236),
-            array(213,237),
-            array(213,238),
-            array(213,239),
-            array(213,240),
-            array(213,241),
-            array(213,242),
-            array(213,243),
-            
-            array(214,235),
-            array(214,236),
-            array(214,237),
-            array(214,238),
-            array(214,239),
-            array(214,240),
-            array(214,241),
-            array(214,242),
-            array(214,243),
-            
-            array(215,235),
-            array(215,236),
-            array(215,237),
-            array(215,238),
-            array(215,239),
-            array(215,240),
-            array(215,241),
-            array(215,242),
-            array(215,243),
-            
-            array(216,236),
-            array(216,237),
-            array(216,238),
-            array(216,239),
-            array(216,240),
-            array(216,241),
-            array(216,242),
-            array(216,243),
-            array(216,244),
-
-            array(217,237),
-            array(217,238),
-            array(217,239),
-            array(217,240),
-            array(217,241),
-            array(217,242),
-            array(217,243),
-            array(217,244),
-
-            array(218,237),
-            array(218,238),
-            array(218,239),
-            array(218,240),
-            array(218,241),
-            array(218,242),
-            array(218,243),
-            array(218,244),
-
-            array(219,237),
-            array(219,238),
-            array(219,239),
-            array(219,240),
-            array(219,241),
-            array(219,242),
-            array(219,243),
-            array(219,244),
-            array(219,245),
-
-            array(220,237),
-            array(220,238),
-            array(220,239),
-            array(220,240),
-            array(220,241),
-            array(220,242),
-            array(220,243),
-            array(220,244),
-            array(220,245),
-            array(220,246),
-            
-            array(221,237),
-            array(221,238),
-            array(221,239),
-            array(221,240),
-            array(221,241),
-            array(221,242),
-            array(221,243),
-            array(221,244),
-            array(221,245),
-            array(221,246),
-
-            array(222,238),
-            array(222,239),
-            array(222,240),
-            array(222,241),
-            array(222,242),
-            array(222,243),
-            array(222,244),
-            array(222,245),
-            array(222,246),
-
-            array(223,238),
-            array(223,239),
-            array(223,240),
-            array(223,241),
-            array(223,242),
-            array(223,243),
-            array(223,244),
-            array(223,245),
-            array(223,246),
-
-            array(224,238),
-            array(224,239),
-            array(224,240),
-            array(224,241),
-            array(224,242),
-            array(224,243),
-            array(224,244),
-            array(224,245),
-            array(224,246),
-            
-            
-            array(225,238),
-            array(225,239),
-            array(225,240),
-            array(225,241),
-            array(225,242),
-            array(225,243),
-            array(225,244),
-            array(225,245),
-            array(225,246),
-            array(225,247),
-
-            array(226,238),
-            array(226,239),
-            array(226,240),
-            array(226,241),
-            array(226,242),
-            array(226,243),
-            array(226,244),
-            array(226,245),
-            array(226,246),
-            array(226,247),
-
-            array(227,238),
-            array(227,239),
-            array(227,240),
-            array(227,241),
-            array(227,242),
-            array(227,243),
-            array(227,244),
-            array(227,245),
-            array(227,246),
-            array(227,247),
-            
-            
-
-            array(228,239),
-            array(228,240),
-            array(228,241),
-            array(228,242),
-            array(228,243),
-            array(228,244),
-            array(228,245),
-            array(228,246),
-            array(228,247),
-            array(228,248),
-            array(228,249),
-
-            array(229,239),
-            array(229,240),
-            array(229,241),
-            array(229,242),
-            array(229,243),
-            array(229,244),
-            array(229,245),
-            array(229,246),
-            array(229,247),
-            array(229,248),
-            array(229,249),
-
-            array(230,239),
-            array(230,240),
-            array(230,241),
-            array(230,242),
-            array(230,243),
-            array(230,244),
-            array(230,245),
-            array(230,246),
-            array(230,247),
-            array(230,248),
-            array(230,249),
-
-            array(231,241),
-            array(231,242),
-            array(231,243),
-            array(231,244),
-            array(231,245),
-            array(231,246),
-            array(231,247),
-            array(231,248),
-            array(231,249),
-            
-
-            array(232,241),
-            array(232,242),
-            array(232,243),
-            array(232,244),
-            array(232,245),
-            array(232,246),
-            array(232,247),
-            array(232,248),
-            array(232,249),
-            array(232,250),
-
-            
-            array(233,241),
-            array(233,242),
-            array(233,243),
-            array(233,244),
-            array(233,245),
-            array(233,246),
-            array(233,247),
-            array(233,248),
-            array(233,249),
-            array(233,250),
-
-            array(234,241),
-            array(234,242),
-            array(234,243),
-            array(234,244),
-            array(234,245),
-            array(234,246),
-            array(234,247),
-            array(234,248),
-            array(234,249),
-            array(234,250),
-            
-
-            array(235,241),
-            array(235,242),
-            array(235,243),
-            array(235,244),
-            array(235,245),
-            array(235,246),
-            array(235,247),
-            array(235,248),
-            array(235,249),
-            array(235,250),
-            array(235,251),
-
-            array(236,241),
-            array(236,242),
-            array(236,243),
-            array(236,244),
-            array(236,245),
-            array(236,246),
-            array(236,247),
-            array(236,248),
-            array(236,249),
-            array(236,250),
-            array(236,251),
-            
-
-            array(237,241),
-            array(237,242),
-            array(237,243),
-            array(237,244),
-            array(237,245),
-            array(237,246),
-            array(237,247),
-            array(237,248),
-            array(237,249),
-            array(237,250),
-            array(237,251),
-            array(237,252),
-
-            array(238,242),
-            array(238,243),
-            array(238,244),
-            array(238,245),
-            array(238,246),
-            array(238,247),
-            array(238,248),
-            array(238,249),
-            array(238,250),
-            array(238,251),
-            array(238,252),
-            
-
-            array(239,243),
-            array(239,244),
-            array(239,245),
-            array(239,246),
-            array(239,247),
-            array(239,248),
-            array(239,249),
-            array(239,250),
-            array(239,251),
-            array(239,252),
-            array(239,253),
-
-            array(240,243),
-            array(240,244),
-            array(240,245),
-            array(240,246),
-            array(240,247),
-            array(240,248),
-            array(240,249),
-            array(240,250),
-            array(240,251),
-            array(240,252),
-            array(240,253),
-
-            
-            array(241,243),
-            array(241,244),
-            array(241,245),
-            array(241,246),
-            array(241,247),
-            array(241,248),
-            array(241,249),
-            array(241,250),
-            array(241,251),
-            array(241,252),
-            array(241,253),
-            array(241,254),
-            
-            
-
-            array(242,242),
-            array(242,243),
-            array(242,244),
-            array(242,245),
-            array(242,246),
-            array(242,247),
-            array(242,248),
-            array(242,249),
-            array(242,250),
-            array(242,251),
-            array(242,252),
-            array(242,253),
-            array(242,254),
-            array(242,255),
-            array(242,256),
-
-            
-            array(243,242),
-            array(243,243),
-            array(243,244),
-            array(243,245),
-            array(243,246),
-            array(243,247),
-            array(243,248),
-            array(243,249),
-            array(243,250),
-            array(243,251),
-            array(243,252),
-            array(243,253),
-            array(243,254),
-            array(243,255),
-            array(243,256),
-            
-            
-
-            array(244,241),
-            array(244,242),
-            array(244,243),
-            array(244,244),
-            array(244,245),
-            array(244,246),
-            array(244,247),
-            array(244,248),
-            array(244,249),
-            array(244,250),
-            array(244,251),
-            array(244,252),
-            array(244,253),
-            array(244,254),
-            array(244,255),
-            array(244,256),
-            array(244,257),
-            array(244,258),
-
-            array(245,242),
-            array(245,243),
-            array(245,244),
-            array(245,245),
-            array(245,246),
-            array(245,247),
-            array(245,248),
-            array(245,249),
-            array(245,250),
-            array(245,251),
-            array(245,252),
-            array(245,253),
-            array(245,254),
-            array(245,255),
-            array(245,256),
-            array(245,257),
-            array(245,258),
-            
-
-            array(246,242),
-            array(246,243),
-            array(246,244),
-            array(246,245),
-            array(246,246),
-            array(246,247),
-            array(246,248),
-            array(246,249),
-            array(246,250),
-            array(246,251),
-            array(246,252),
-            array(246,253),
-            array(246,254),
-            array(246,255),
-            array(246,256),
-            array(246,257),
-            array(246,258),
-            array(246,259),
-
-            array(247,242),
-            array(247,243),
-            array(247,244),
-            array(247,245),
-            array(247,246),
-            array(247,247),
-            array(247,248),
-            array(247,249),
-            array(247,250),
-            array(247,251),
-            array(247,252),
-            array(247,253),
-            array(247,254),
-            array(247,255),
-            array(247,256),
-            array(247,257),
-            array(247,258),
-            array(247,259),
-
-            
-            array(248,242),
-            array(248,243),
-            array(248,244),
-            array(248,245),
-            array(248,246),
-            array(248,247),
-            array(248,248),
-            array(248,249),
-            array(248,250),
-            array(248,251),
-            array(248,252),
-            array(248,253),
-            array(248,254),
-            array(248,255),
-            array(248,256),
-            array(248,257),
-            array(248,258),
-            array(248,259),
-
-            array(249,242),
-            array(249,243),
-            array(249,244),
-            array(249,245),
-            array(249,246),
-            array(249,247),
-            array(249,248),
-            array(249,249),
-            array(249,250),
-            array(249,251),
-            array(249,252),
-            array(249,253),
-            array(249,254),
-            array(249,255),
-            array(249,256),
-            array(249,257),
-            array(249,258),
-            array(249,259),
-
-            array(250,242),
-            array(250,243),
-            array(250,244),
-            array(250,245),
-            array(250,246),
-            array(250,247),
-            array(250,248),
-            array(250,249),
-            array(250,250),
-            array(250,251),
-            array(250,252),
-            array(250,253),
-            array(250,254),
-            array(250,255),
-            array(250,256),
-            array(250,257),
-            array(250,258),
-            array(250,259),
-
-            array(251,242),
-            array(251,243),
-            array(251,244),
-            array(251,245),
-            array(251,246),
-            array(251,247),
-            array(251,248),
-            array(251,249),
-            array(251,250),
-            array(251,251),
-            array(251,252),
-            array(251,253),
-            array(251,254),
-            array(251,255),
-            array(251,256),
-            array(251,257),
-            array(251,258),
-            array(251,259),
-            array(251,260),
-
-            array(252,243),
-            array(252,244),
-            array(252,245),
-            array(252,246),
-            array(252,247),
-            array(252,248),
-            array(252,249),
-            array(252,250),
-            array(252,251),
-            array(252,252),
-            array(252,253),
-            array(252,254),
-            array(252,255),
-            array(252,256),
-            array(252,257),
-            array(252,258),
-            array(252,259),
-            array(252,260),
-            
-            
-
-            array(253,243),
-            array(253,244),
-            array(253,245),
-            array(253,246),
-            array(253,247),
-            array(253,248),
-            array(253,249),
-            array(253,250),
-            array(253,251),
-            array(253,252),
-            array(253,253),
-            array(253,254),
-            array(253,255),
-            array(253,256),
-            array(253,257),
-            array(253,258),
-            array(253,259),
-            array(253,260),
-            array(253,261),
-            array(253,262),
-
-            array(254,244),
-            array(254,245),
-            array(254,246),
-            array(254,247),
-            array(254,248),
-            array(254,249),
-            array(254,250),
-            array(254,251),
-            array(254,252),
-            array(254,253),
-            array(254,254),
-            array(254,255),
-            array(254,256),
-            array(254,257),
-            array(254,258),
-            array(254,259),
-            array(254,260),
-            array(254,261),
-            array(254,262),
-            array(254,263),
-
-            array(255,244),
-            array(255,245),
-            array(255,246),
-            array(255,247),
-            array(255,248),
-            array(255,249),
-            array(255,250),
-            array(255,251),
-            array(255,252),
-            array(255,253),
-            array(255,254),
-            array(255,255),
-            array(255,256),
-            array(255,257),
-            array(255,258),
-            array(255,259),
-            array(255,260),
-            array(255,261),
-            array(255,262),
-            array(255,263),
-            array(255,264),
-
-            array(256,244),
-            array(256,245),
-            array(256,246),
-            array(256,247),
-            array(256,248),
-            array(256,249),
-            array(256,250),
-            array(256,251),
-            array(256,252),
-            array(256,253),
-            array(256,254),
-            array(256,255),
-            array(256,256),
-            array(256,257),
-            array(256,258),
-            array(256,259),
-            array(256,260),
-            array(256,261),
-            array(256,262),
-            array(256,263),
-            array(256,264),
-
-            array(257,245),
-            array(257,246),
-            array(257,247),
-            array(257,248),
-            array(257,249),
-            array(257,250),
-            array(257,251),
-            array(257,252),
-            array(257,253),
-            array(257,254),
-            array(257,255),
-            array(257,256),
-            array(257,257),
-            array(257,258),
-            array(257,259),
-            array(257,260),
-            array(257,261),
-            array(257,262),
-            array(257,263),
-            array(257,264),
-
-            array(258,245),
-            array(258,246),
-            array(258,247),
-            array(258,248),
-            array(258,249),
-            array(258,250),
-            array(258,251),
-            array(258,252),
-            array(258,253),
-            array(258,254),
-            array(258,255),
-            array(258,256),
-            array(258,257),
-            array(258,258),
-            array(258,259),
-            array(258,260),
-            array(258,261),
-            array(258,262),
-            array(258,263),
-            array(258,264),
-            array(258,265),
-            array(258,266),
-
-            array(259,245),
-            array(259,246),
-            array(259,247),
-            array(259,248),
-            array(259,249),
-            array(259,250),
-            array(259,251),
-            array(259,252),
-            array(259,253),
-            array(259,254),
-            array(259,255),
-            array(259,256),
-            array(259,257),
-            array(259,258),
-            array(259,259),
-            array(259,260),
-            array(259,261),
-            array(259,262),
-            array(259,263),
-            array(259,264),
-            array(259,265),
-            array(259,266),
-
-            array(260,245),
-            array(260,246),
-            array(260,247),
-            array(260,248),
-            array(260,249),
-            array(260,250),
-            array(260,251),
-            array(260,252),
-            array(260,253),
-            array(260,254),
-            array(260,255),
-            array(260,256),
-            array(260,257),
-            array(260,258),
-            array(260,259),
-            array(260,260),
-            array(260,261),
-            array(260,262),
-            array(260,263),
-            array(260,264),
-            array(260,265),
-            array(260,266),
-
-            array(261,245),
-            array(261,246),
-            array(261,247),
-            array(261,248),
-            array(261,249),
-            array(261,250),
-            array(261,251),
-            array(261,252),
-            array(261,253),
-            array(261,254),
-            array(261,255),
-            array(261,256),
-            array(261,257),
-            array(261,258),
-            array(261,259),
-            array(261,260),
-            array(261,261),
-            array(261,262),
-            array(261,263),
-            array(261,264),
-            array(261,265),
-            array(261,266),
-            array(261,267),
-
-            array(262,245),
-            array(262,246),
-            array(262,247),
-            array(262,248),
-            array(262,249),
-            array(262,250),
-            array(262,251),
-            array(262,252),
-            array(262,253),
-            array(262,254),
-            array(262,255),
-            array(262,256),
-            array(262,257),
-            array(262,258),
-            array(262,259),
-            array(262,260),
-            array(262,261),
-            array(262,262),
-            array(262,263),
-            array(262,264),
-            array(262,265),
-            array(262,266),
-            array(262,267),
-
-            array(263,245),
-            array(263,246),
-            array(263,247),
-            array(263,248),
-            array(263,249),
-            array(263,250),
-            array(263,251),
-            array(263,252),
-            array(263,253),
-            array(263,254),
-            array(263,255),
-            array(263,256),
-            array(263,257),
-            array(263,258),
-            array(263,259),
-            array(263,260),
-            array(263,261),
-            array(263,262),
-            array(263,263),
-            array(263,264),
-            array(263,265),
-            array(263,266),
-            array(263,267),
-
-            array(264,246),
-            array(264,247),
-            array(264,248),
-            array(264,249),
-            array(264,250),
-            array(264,251),
-            array(264,252),
-            array(264,253),
-            array(264,254),
-            array(264,255),
-            array(264,256),
-            array(264,257),
-            array(264,258),
-            array(264,259),
-            array(264,260),
-            array(264,261),
-            array(264,262),
-            array(264,263),
-            array(264,264),
-            array(264,265),
-            array(264,266),
-            array(264,267),
-
-            array(265,246),
-            array(265,247),
-            array(265,248),
-            array(265,249),
-            array(265,250),
-            array(265,251),
-            array(265,252),
-            array(265,253),
-            array(265,254),
-            array(265,255),
-            array(265,256),
-            array(265,257),
-            array(265,258),
-            array(265,259),
-            array(265,260),
-            array(265,261),
-            array(265,262),
-            array(265,263),
-            array(265,264),
-            array(265,265),
-            array(265,266),
-            array(265,267),
-
-            array(266,246),
-            array(266,247),
-            array(266,248),
-            array(266,249),
-            array(266,250),
-            array(266,251),
-            array(266,252),
-            array(266,253),
-            array(266,254),
-            array(266,255),
-            array(266,256),
-            array(266,257),
-            array(266,258),
-            array(266,259),
-            array(266,260),
-            array(266,261),
-            array(266,262),
-            array(266,263),
-            array(266,264),
-            array(266,265),
-            array(266,266),
-            array(266,267),
-
-            array(267,247),
-            array(267,248),
-            array(267,249),
-            array(267,250),
-            array(267,251),
-            array(267,252),
-            array(267,253),
-            array(267,254),
-            array(267,255),
-            array(267,256),
-            array(267,257),
-            array(267,258),
-            array(267,259),
-            array(267,260),
-            array(267,261),
-            array(267,262),
-            array(267,263),
-            array(267,264),
-            array(267,265),
-            array(267,267),
-            array(266,267),
-
-            array(268,247),
-            array(268,248),
-            array(268,249),
-            array(268,250),
-            array(268,251),
-            array(268,252),
-            array(268,253),
-            array(268,254),
-            array(268,255),
-            array(268,256),
-            array(268,257),
-            array(268,258),
-            array(268,259),
-            array(268,260),
-            array(268,261),
-            array(268,262),
-            array(268,263),
-            array(268,264),
-            array(268,265),
-            array(268,266),
-            array(268,267),
-
-            array(269,247),
-            array(269,248),
-            array(269,249),
-            array(269,250),
-            array(269,251),
-            array(269,252),
-            array(269,253),
-            array(269,254),
-            array(269,255),
-            array(269,256),
-            array(269,257),
-            array(269,258),
-            array(269,259),
-            array(269,260),
-            array(269,261),
-            array(269,262),
-            array(269,263),
-            array(269,264),
-            array(269,265),
-            array(269,266),
-            array(269,267),
-
-            array(270,247),
-            array(270,248),
-            array(270,249),
-            array(270,250),
-            array(270,251),
-            array(270,252),
-            array(270,253),
-            array(270,254),
-            array(270,255),
-            array(270,256),
-            array(270,257),
-            array(270,258),
-            array(270,259),
-            array(270,260),
-            array(270,261),
-            array(270,262),
-            array(270,263),
-            array(270,264),
-            array(270,265),
-            array(270,266),
-            array(270,267),
-
-            array(271,247),
-            array(271,248),
-            array(271,249),
-            array(271,250),
-            array(271,251),
-            array(271,252),
-            array(271,253),
-            array(271,254),
-            array(271,255),
-            array(271,256),
-            array(271,257),
-            array(271,258),
-            array(271,259),
-            array(271,260),
-            array(271,261),
-            array(271,262),
-            array(271,263),
-            array(271,264),
-            array(271,265),
-            array(271,266),
-            array(271,267),
-
-            array(272,247),
-            array(272,248),
-            array(272,249),
-            array(272,250),
-            array(272,251),
-            array(272,252),
-            array(272,253),
-            array(272,254),
-            array(272,255),
-            array(272,256),
-            array(272,257),
-            array(272,258),
-            array(272,259),
-            array(272,260),
-            array(272,261),
-            array(272,262),
-            array(272,263),
-            array(272,264),
-            array(272,265),
-
-            array(273,247),
-            array(273,248),
-            array(273,249),
-            array(273,250),
-            array(273,251),
-            array(273,252),
-            array(273,253),
-            array(273,254),
-            array(273,255),
-            array(273,256),
-            array(273,257),
-            array(273,258),
-            array(273,259),
-            array(273,260),
-            array(273,261),
-            array(273,262),
-            array(273,263),
-            array(273,264),
-            array(273,265),
-            array(273,266),
-            array(273,267),
-
-            array(274,248),
-            array(274,249),
-            array(274,250),
-            array(274,251),
-            array(274,252),
-            array(274,253),
-            array(274,254),
-            array(274,255),
-            array(274,256),
-            array(274,257),
-            array(274,258),
-            array(274,259),
-            array(274,260),
-            array(274,261),
-            array(274,262),
-            array(274,263),
-            array(274,264),
-            array(274,265),
-            array(274,266),
-            array(274,267),
-
-            array(275,248),
-            array(275,249),
-            array(275,250),
-            array(275,251),
-            array(275,252),
-            array(275,253),
-            array(275,254),
-            array(275,255),
-            array(275,256),
-            array(275,257),
-            array(275,258),
-            array(275,259),
-            array(275,260),
-            array(275,261),
-            array(275,262),
-            array(275,263),
-            array(275,264),
-            array(275,265),
-            array(275,266),
-            array(275,267),
-
-            array(276,248),
-            array(276,249),
-            array(276,250),
-            array(276,251),
-            array(276,252),
-            array(276,253),
-            array(276,254),
-            array(276,255),
-            array(276,256),
-            array(276,257),
-            array(276,258),
-            array(276,259),
-            array(276,260),
-            array(276,261),
-            array(276,262),
-            array(276,263),
-            array(276,264),
-            array(276,265),
-            array(276,266),
-            array(276,267),
-
-            array(277,247),
-            array(277,248),
-            array(277,249),
-            array(277,250),
-            array(277,251),
-            array(277,252),
-            array(277,253),
-            array(277,254),
-            array(277,255),
-            array(277,256),
-            array(277,257),
-            array(277,258),
-            array(277,259),
-            array(277,260),
-            array(277,261),
-            array(277,262),
-            array(277,263),
-            array(277,264),
-            array(277,265),
-            array(277,266),
-            array(277,267),
-
-            array(278,247),
-            array(278,248),
-            array(278,249),
-            array(278,250),
-            array(278,251),
-            array(278,252),
-            array(278,253),
-            array(278,254),
-            array(278,255),
-            array(278,256),
-            array(278,257),
-            array(278,258),
-            array(278,259),
-            array(278,260),
-            array(278,261),
-            array(278,262),
-            array(278,263),
-            array(278,264),
-            array(278,265),
-            array(278,266),
-            array(278,267),
-
-            array(279,247),
-            array(279,248),
-            array(279,249),
-            array(279,250),
-            array(279,251),
-            array(279,252),
-            array(279,253),
-            array(279,254),
-            array(279,255),
-            array(279,256),
-            array(279,257),
-            array(279,258),
-            array(279,259),
-            array(279,260),
-            array(279,261),
-            array(279,262),
-            array(279,263),
-            array(279,264),
-            array(279,265),
-            array(279,266),
-            array(279,267),
-
-            array(280,247),
-            array(280,248),
-            array(280,249),
-            array(280,250),
-            array(280,251),
-            array(280,252),
-            array(280,253),
-            array(280,254),
-            array(280,255),
-            array(280,256),
-            array(280,257),
-            array(280,258),
-            array(280,259),
-            array(280,260),
-            array(280,261),
-            array(280,262),
-            array(280,263),
-            array(280,264),
-            array(280,265),
-            array(280,266),
-            array(280,267),
-            array(280,268),
-
-            array(281,248),
-            array(281,249),
-            array(281,250),
-            array(281,251),
-            array(281,252),
-            array(281,253),
-            array(281,254),
-            array(281,255),
-            array(281,256),
-            array(281,257),
-            array(281,258),
-            array(281,259),
-            array(281,260),
-            array(281,261),
-            array(281,262),
-            array(281,263),
-            array(281,264),
-            array(281,265),
-            array(281,266),
-            array(281,267),
-
-            array(282,248),
-            array(282,249),
-            array(282,250),
-            array(282,251),
-            array(282,252),
-            array(282,253),
-            array(282,254),
-            array(282,255),
-            array(282,256),
-            array(282,257),
-            array(282,258),
-            array(282,259),
-            array(282,260),
-            array(282,261),
-            array(282,262),
-            array(282,263),
-            array(282,264),
-            array(282,265),
-            array(282,266),
-            array(282,267),
-
-            array(283,249),
-            array(283,250),
-            array(283,251),
-            array(283,252),
-            array(283,253),
-            array(283,254),
-            array(283,255),
-            array(283,256),
-            array(283,257),
-            array(283,258),
-            array(283,259),
-            array(283,260),
-            array(283,261),
-            array(283,262),
-            array(283,263),
-            array(283,264),
-            array(283,265),
-            array(283,266),
-            array(283,267),
-
-            array(284,250),
-            array(284,251),
-            array(284,252),
-            array(284,253),
-            array(284,254),
-            array(284,255),
-            array(284,256),
-            array(284,257),
-            array(284,258),
-            array(284,259),
-            array(284,260),
-            array(284,261),
-            array(284,262),
-            array(284,263),
-            array(284,264),
-            array(284,265),
-            array(284,266),
-            array(284,267),
-
-            array(284,251),
-            array(284,252),
-            array(284,253),
-            array(284,254),
-            array(284,255),
-            array(284,256),
-            array(284,257),
-            array(284,258),
-            array(284,259),
-            array(284,260),
-            array(284,261),
-            array(284,262),
-            array(284,263),
-            array(284,264),
-            array(284,265),
-            array(284,266),
-            array(284,267),
-
-            array(285,251),
-            array(285,252),
-            array(285,253),
-            array(285,254),
-            array(285,255),
-            array(285,256),
-            array(285,257),
-            array(285,258),
-            array(285,259),
-            array(285,260),
-            array(285,261),
-            array(285,262),
-            array(285,263),
-            array(285,264),
-            array(285,265),
-            array(285,266),
-            array(285,267),
-
-            array(286,251),
-            array(286,252),
-            array(286,253),
-            array(286,254),
-            array(286,255),
-            array(286,256),
-            array(286,257),
-            array(286,258),
-            array(286,259),
-            array(286,260),
-            array(286,261),
-            array(286,262),
-            array(286,263),
-            array(286,264),
-            array(286,265),
-            array(286,266),
-            array(286,267),
-
-            array(287,252),
-            array(287,253),
-            array(287,254),
-            array(287,255),
-            array(287,256),
-            array(287,257),
-            array(287,258),
-            array(287,259),
-            array(287,260),
-            array(287,261),
-            array(287,262),
-            array(287,263),
-            array(287,264),
-            array(287,265),
-            array(287,266),
-            array(287,267),
-
-            
-            array(288,253),
-            array(288,254),
-            array(288,255),
-            array(288,256),
-            array(288,257),
-            array(288,258),
-            array(288,259),
-            array(288,260),
-            array(288,261),
-            array(288,262),
-            array(288,263),
-            array(288,264),
-            array(288,265),
-            array(288,266),
-            array(288,267),
-            array(288,268),
-
-            array(289,254),
-            array(289,255),
-            array(289,256),
-            array(289,257),
-            array(289,258),
-            array(289,259),
-            array(289,260),
-            array(289,261),
-            array(289,262),
-            array(289,263),
-            array(289,264),
-            array(289,265),
-            array(289,266),
-            array(289,267),
-            array(289,268),
-
-            array(290,254),
-            array(290,255),
-            array(290,256),
-            array(290,257),
-            array(290,258),
-            array(290,259),
-            array(290,260),
-            array(290,261),
-            array(290,262),
-            array(290,263),
-            array(290,264),
-            array(290,265),
-            array(290,266),
-            array(290,267),
-            array(290,268),
-
-            array(291,254),
-            array(291,255),
-            array(291,256),
-            array(291,257),
-            array(291,258),
-            array(291,259),
-            array(291,260),
-            array(291,261),
-            array(291,262),
-            array(291,263),
-            array(291,264),
-            array(291,265),
-            array(291,266),
-            array(291,267),
-            array(291,268),
-
-            array(292,255),
-            array(292,256),
-            array(292,257),
-            array(292,258),
-            array(292,259),
-            array(292,260),
-            array(292,261),
-            array(292,262),
-            array(292,263),
-            array(292,264),
-            array(292,265),
-            array(292,266),
-            array(292,267),
-            array(292,268),
-
-            array(293,255),
-            array(293,256),
-            array(293,257),
-            array(293,258),
-            array(293,259),
-            array(293,260),
-            array(293,261),
-            array(293,262),
-            array(293,263),
-            array(293,264),
-            array(293,265),
-            array(293,266),
-            array(293,267),
-            array(293,268),
-            
-            array(294,255),
-            array(294,256),
-            array(294,257),
-            array(294,258),
-            array(294,259),
-            array(294,260),
-            array(294,261),
-            array(294,262),
-            array(294,263),
-            array(294,264),
-            array(294,265),
-            array(294,266),
-            array(294,267),
-            array(294,268),
-
-            array(295,255),
-            array(295,256),
-            array(295,257),
-            array(295,258),
-            array(295,259),
-            array(295,260),
-            array(295,261),
-            array(295,262),
-            array(295,263),
-            array(295,264),
-            array(295,265),
-            array(295,266),
-            array(295,267),
-            array(295,268),
-
-            array(296,255),
-            array(296,256),
-            array(296,257),
-            array(296,258),
-            array(296,259),
-            array(296,260),
-            array(296,261),
-            array(296,262),
-            array(296,263),
-            array(296,264),
-            array(296,265),
-            array(296,266),
-            array(296,267),
-            array(296,268),
-
-            array(297,256),
-            array(297,257),
-            array(297,258),
-            array(297,259),
-            array(297,260),
-            array(297,261),
-            array(297,262),
-            array(297,263),
-            array(297,264),
-            array(297,265),
-            array(297,266),
-            array(297,267),
-            array(297,268),
-
-            array(298,256),
-            array(298,257),
-            array(298,258),
-            array(298,259),
-            array(298,260),
-            array(298,261),
-            array(298,262),
-            array(298,263),
-            array(298,264),
-            array(298,265),
-            array(298,266),
-            array(298,267),
-
-            array(299,257),
-            array(299,258),
-            array(299,259),
-            array(299,260),
-            array(299,261),
-            array(299,262),
-            array(299,263),
-            array(299,264),
-            array(299,265),
-            array(299,266),
-            array(299,267),
-            array(299,268),
-
-            array(300,257),
-            array(300,258),
-            array(300,259),
-            array(300,260),
-            array(300,261),
-            array(300,262),
-            array(300,263),
-            array(300,264),
-            array(300,265),
-            array(300,266),
-            array(300,267),
-            array(300,268),
-            array(300,269),
-
-            array(301,258),
-            array(301,259),
-            array(301,260),
-            array(301,261),
-            array(301,262),
-            array(301,263),
-            array(301,264),
-            array(301,265),
-            array(301,266),
-            array(301,267),
-            array(301,268),
-
-            array(302,258),
-            array(302,259),
-            array(302,260),
-            array(302,261),
-            array(302,262),
-            array(302,263),
-            array(302,264),
-            array(302,265),
-            array(302,266),
-            array(302,267),
-            array(302,268),
-
-            array(303,258),
-            array(303,259),
-            array(303,260),
-            array(303,261),
-            array(303,262),
-            array(303,263),
-            array(303,264),
-            array(303,265),
-            array(303,266),
-            array(303,267),
-            array(303,268),
-
-            array(304,259),
-            array(304,260),
-            array(304,261),
-            array(304,262),
-            array(304,263),
-            array(304,264),
-            array(304,265),
-            array(304,266),
-            array(304,267),
-            array(304,268),
-
-            array(305,259),
-            array(305,260),
-            array(305,261),
-            array(305,262),
-            array(305,263),
-            array(305,264),
-            array(305,265),
-            array(305,266),
-            array(305,267),
-
-            array(306,260),
-            array(306,261),
-            array(306,262),
-            array(306,263),
-            array(306,264),
-            array(306,265),
-            array(306,266),
-            array(306,267),
-
-            array(307,260),
-            array(307,261),
-            array(307,262),
-            array(307,263),
-            array(307,264),
-            array(307,265),
-            array(307,266),
-            array(307,267),
-
-            array(308,260),
-            array(308,261),
-            array(308,262),
-            array(308,263),
-            array(308,264),
-            array(308,265),
-            array(308,266),
-            array(308,267),
-
-            array(309,259),
-            array(309,260),
-            array(309,261),
-            array(309,262),
-            array(309,263),
-            array(309,264),
-            array(309,265),
-            array(309,266),
-
-            array(310,259),
-            array(310,260),
-            array(310,261),
-            array(310,262),
-            array(310,263),
-            array(310,264),
-            array(310,265),
-
-            array(311,260),
-            array(311,261),
-            array(311,262),
-            array(311,263),
-            array(311,264),
-            array(311,265),
-
-            array(312,260),
-            array(312,261),
-            array(312,262),
-            array(312,263),
-            array(312,264),
-            array(312,265),
-            array(312,266),
-
-            array(313,260),
-            array(313,261),
-            array(313,262),
-            array(313,263),
-            array(313,264),
-            array(313,265),
-
-            array(314,261),
-            array(314,262),
-            array(314,263),
-            array(314,264),
-            array(314,265),
-
-            array(315,261),
-            array(315,262),
-            array(315,263),
-            array(315,264),
-
-            array(316,262),
-            array(316,263),
-            array(316,264),
-
-            array(317,262),
-            array(317,263),
-            array(317,264),
-
-            array(318,263),
-            array(318,264),
-
-            array(319,263),
-            array(319,264),
-            
-
-         );
-
-        // var_dump(Input::hasFile('import_files'));
+        
         if(Input::hasFile('import_files')){
             $file = Input::file('import_files'); 
             $reader = ReaderFactory::create(Type::CSV);
             $reader->setFieldDelimiter(',');
             $reader->setEndOfLineCharacter("\n");
-
             $date = explode("_",$file[0]->getClientOriginalName());
             $date_now = $date[1][0].$date[1][1].$date[1][2].$date[1][3].'-'.$date[1][4].$date[1][5].'-'.$date[1][6].$date[1][7].' '.$date[2][0].$date[2][1].':00:00';
-            var_dump($date_now);
+            // var_dump($date_now);
 
             foreach ($file as $files) {
                 $reader->open($files->path());
@@ -3380,417 +991,27 @@ class BencanaController extends Controller
                 }   
             }
             $reader->close();
+            
+            $writer = WriterFactory::create(Type::XLSX); // for XLSX files
+            $writer->setShouldUseInlineStrings(true); // default (and recommended) value
+            $reader->setShouldFormatDates(true);
+            $writer->openToBrowser($fileName); // stream data directly to the browser
             for ($i=0; $i < count($file) ; $i++) { 
-                foreach ($paramHilir as $key) {
-                    $key_new = $key[0]-1;
-                    // echo "Hilir ".$key[0].",".$key[1].": ".$datasExcel[$i][$key_new][$key[1]]."\n";
-                    $sumValHilir += $datasExcel[$i][$key_new][$key[1]];
-                }
+                // array_push($dataExcelExport,$date_now);
+                $dataExcelExport = [];
                 foreach ($parameHulu as $key) {
                     $key_new = $key[0]-1;
                     // echo "Hulu ".$key[0].",".$key[1].": ".$datasExcel[$i][$key_new][$key[1]]."\n";
-                    $sumValHulu += $datasExcel[$i][$key_new][$key[1]];
+                    array_push($dataExcelExport,$datasExcel[$i][$key_new][$key[1]]);
                 }
-                foreach ($parameTengah as $key) {
-                    $key_new = $key[0]-1;
-                    // echo "Tengah ".$key[0].",".$key[1].": ".$datasExcel[$i][$key_new][$key[1]]."\n";
-                    $sumValTengah += $datasExcel[$i][$key_new][$key[1]];
-                }
-                // var_dump($datasExcel[$i]);
+                array_push($dataExportExcelFull,$dataExcelExport);
+                $writer->addRow($dataExcelExport); 
             }
-
-            $vHilirHasil = array(
-                'rainfall' => $sumValHilir/(count($paramHilir) * count($file)),
-                'soil' => 'SOIL',
-                'slope' => 0.07893,
-                'area_id' => 3,
-            );
-
-            $vTengahHasil = array(
-                'rainfall' => $sumValTengah/(count($parameTengah) * count($file)),
-                'soil' => 'SOIL',
-                'slope' => 0.09923,
-                'area_id' => 1,
-            );
-
-            $vHuluHasil = array(
-                'rainfall' => $sumValHulu/(count($parameHulu) * count($file)),
-                'soil' => 'NON-SOIL',
-                'slope' => 0.28234,
-                'area_id' => 2,
-            );
-            
-
-            array_push($valueData['vHulu'],$vHuluHasil);
-            array_push($valueData['vTengah'],$vTengahHasil);
-            array_push($valueData['vHilir'],$vHilirHasil);
-
-            $valueData['sHulu'] = $this->NaiveBayes($valueData['vHulu'][0]);
-            $valueData['sTengah'] = $this->NaiveBayes($valueData['vTengah'][0]);
-            $valueData['sHilir'] = $this->NaiveBayes($valueData['vHilir'][0]);
-
-            $data = New ParameterBayesModel;
-            $data->rainfall = round($vHuluHasil['rainfall'], 5);
-            $data->soil = $vHuluHasil['soil'];
-            $data->slope = $vHuluHasil['slope'];
-            $data->status = $valueData['sHulu']['text'];
-            $data->area_id = $vHuluHasil['area_id'];
-            $data->date = $date_now;
-            $data->save();
-
-            $data2 = New ParameterBayesModel;
-            $data2->rainfall = round($vTengahHasil['rainfall'], 5);
-            $data2->soil = $vTengahHasil['soil'];
-            $data2->slope = $vTengahHasil['slope'];
-            $data2->status = $valueData['sTengah']['text'];
-            $data2->area_id = $vTengahHasil['area_id'];
-            $data2->date = $date_now;
-            $data2->save();
-
-            $data3 = New ParameterBayesModel;
-            $data3->rainfall = round($vHilirHasil['rainfall'], 5);
-            $data3->soil = $vHilirHasil['soil'];
-            $data3->slope = $vHilirHasil['slope'];
-            $data3->status = $valueData['sHilir']['text'];
-            $data3->area_id = $vHilirHasil['area_id'];
-            $data3->date = $date_now;
-            $data3->save();
-
-            var_dump($valueData);
+            $writer->close();
+            var_dump($dataExportExcelFull);
         }else{
             return redirect('bencana');
         }
-    }
-
-    public function NaiveBayes($dataUji){
-        $dataLatih = [];
-
-        $paramRainfall = array(
-            'rendah' => array(
-                'aman' => array(),
-                'rawan' => array(),
-                'prob_aman'=> 0,
-                'prob_rawan'=> 0,
-            ),
-            'sedang' => array(
-                'aman' => array(),
-                'rawan' => array(),
-                'prob_aman'=> 0,
-                'prob_rawan'=> 0,
-            ),
-            'tinggi' => array(
-                'aman' => array(),
-                'rawan' => array(),
-                'prob_aman'=> 0,
-                'prob_rawan'=> 0,
-            ),
-        );
-        $paramSlope = array(
-            'landai' => array(
-                'aman' => array(),
-                'rawan' => array(),
-                'prob_aman'=> 0,
-                'prob_rawan'=> 0,
-            ),
-            'sedang' => array(
-                'aman' => array(),
-                'rawan' => array(),
-                'prob_aman'=> 0,
-                'prob_rawan'=> 0,
-            ),
-            'curam' => array(
-                'aman' => array(),
-                'rawan' => array(),
-                'prob_aman'=> 0,
-                'prob_rawan'=> 0,
-            ),
-        );
-        $paramSoil = array(
-            'soil' => array(
-                'aman' => array(),
-                'rawan' => array(),
-                'prob_aman'=> 0,
-                'prob_rawan'=> 0,
-            ),
-            'non_soil' => array(
-                'aman' => array(),
-                'rawan' => array(),
-                'prob_aman'=> 0,
-                'prob_rawan'=> 0,
-            ),
-        );
-
-        $data = ParameterModel::where('area_id',$dataUji['area_id'])->get();
-        $aman = ParameterModel::where('area_id',$dataUji['area_id'])->where('status','aman')->get();
-        $rawan = ParameterModel::where('area_id',$dataUji['area_id'])->where('status','rawan')->get();
-
-
-        foreach ($data as $key) {
-            $rainfall = $this->rescale_rain($key->rainfall);
-
-            $slope = $this->rescale_slope($key->slope);
-
-            $params = array(
-                'v_rainfall' => $key->rainfall,
-                'rainfall' => $rainfall,
-                'v_slope' => $key->slope,
-                'slope' => $slope,
-                'soil' => $key->soil,
-                'area_id' => $key->area_id,
-                'status' => $key->status,
-                'date' => $key->date
-            );
-
-            if($params['rainfall'] == 'RENDAH'){
-                if($params['status'] == 'AMAN'){
-                    array_push($paramRainfall['rendah']['aman'],$params);
-                }else{
-                    array_push($paramRainfall['rendah']['rawan'],$params);
-                }
-            }elseif ($params['rainfall'] == 'SEDANG') {
-                if($params['status'] == 'AMAN'){
-                    array_push($paramRainfall['sedang']['aman'],$params);
-                }else{
-                    array_push($paramRainfall['sedang']['rawan'],$params);
-                }
-            }else{
-                if($params['status'] == 'AMAN'){
-                    array_push($paramRainfall['tinggi']['aman'],$params);
-                }else{
-                    array_push($paramRainfall['tinggi']['rawan'],$params);
-                }
-            }
-
-            if($params['slope'] == 'LANDAI'){
-                if($params['status'] == 'AMAN'){
-                    array_push($paramSlope['landai']['aman'],$params);
-                }else{
-                    array_push($paramSlope['landai']['rawan'],$params);
-                }
-            }elseif ($params['slope'] == 'SEDANG') {
-                if($params['status'] == 'AMAN'){
-                    array_push($paramSlope['sedang']['aman'],$params);
-                }else{
-                    array_push($paramSlope['sedang']['rawan'],$params);
-                }
-            }else{
-                if($params['status'] == 'AMAN'){
-                    array_push($paramSlope['curam']['aman'],$params);
-                }else{
-                    array_push($paramSlope['curam']['rawan'],$params);
-                }
-            }
-
-            if($params['soil'] == 'SOIL'){
-                if($params['status'] == 'AMAN'){
-                    array_push($paramSoil['soil']['aman'],$params);
-                }else{
-                    array_push($paramSoil['soil']['rawan'],$params);
-                }
-            }else{
-                if($params['status'] == 'AMAN'){
-                    array_push($paramSoil['non_soil']['aman'],$params);
-                }else{
-                    array_push($paramSoil['non_soil']['rawan'],$params);
-                }
-            }
-            array_push($dataLatih,$params);
-        }
-
-
-
-        $dataUji['rainfall'] = $this->rescale_rain($dataUji['rainfall']);
-        $dataUji['slope'] = $this->rescale_slope($dataUji['slope']); 
-
-        $paramRainfall['rendah']['prob_aman'] = count($paramRainfall['rendah']['aman'])/count($aman);
-        $paramRainfall['rendah']['prob_rawan'] = count($paramRainfall['rendah']['rawan'])/count($rawan);
-        $paramRainfall['sedang']['prob_aman'] = count($paramRainfall['sedang']['aman'])/count($aman);
-        $paramRainfall['sedang']['prob_rawan'] = count($paramRainfall['sedang']['rawan'])/count($rawan);
-        $paramRainfall['tinggi']['prob_aman'] = count($paramRainfall['tinggi']['aman'])/count($aman);
-        $paramRainfall['tinggi']['prob_rawan'] = count($paramRainfall['tinggi']['rawan'])/count($rawan);
-
-        $paramSlope['landai']['prob_aman'] = count($paramSlope['landai']['aman'])/count($aman);
-        $paramSlope['landai']['prob_rawan'] = count($paramSlope['landai']['rawan'])/count($rawan);
-        $paramSlope['sedang']['prob_aman'] = count($paramSlope['sedang']['aman'])/count($aman);
-        $paramSlope['sedang']['prob_rawan'] = count($paramSlope['sedang']['rawan'])/count($rawan);
-        $paramSlope['curam']['prob_aman'] = count($paramSlope['curam']['aman'])/count($aman);
-        $paramSlope['curam']['prob_rawan'] = count($paramSlope['curam']['rawan'])/count($rawan);
-
-        $paramSoil['soil']['prob_aman'] = count($paramSoil['soil']['aman'])/count($aman);
-        $paramSoil['soil']['prob_rawan'] = count($paramSoil['soil']['rawan'])/count($rawan);
-        $paramSoil['non_soil']['prob_aman'] = count($paramSoil['non_soil']['aman'])/count($aman);
-        $paramSoil['non_soil']['prob_rawan'] = count($paramSoil['non_soil']['rawan'])/count($rawan);
-
-        $rainRawan = $paramRainfall[strtolower($dataUji['rainfall'])]['prob_rawan'];
-        $rainAman =  $paramRainfall[strtolower($dataUji['rainfall'])]['prob_aman'];
-        $slopeRawan = $paramSlope[strtolower($dataUji['slope'])]['prob_rawan'];
-        $slopeAman = $paramSlope[strtolower($dataUji['slope'])]['prob_aman'];
-
-        // var_dump($dataUji);
-        
-        if(strtolower($dataUji['soil']) == 'soil'){
-            $soiltype = strtolower($dataUji['soil']);
-        }else{
-            $soiltype = 'non_soil';
-        }
-        $soilRawan = $paramSoil[$soiltype]['prob_rawan'];
-        $soilAman = $paramSoil[$soiltype]['prob_aman'];
-
-        $pAman = ($rainAman * $slopeAman * $soilAman)/count($aman);
-        $pRawan = ($rainRawan * $slopeRawan * $soilRawan)/count($rawan);
-
-        if($pAman >= $pRawan){
-            $returnVal = array(
-                'text' => 'Aman', 
-                'value' => $pAman, 
-            );
-            return $returnVal;
-        }else{
-            $returnVal = array(
-                'text' => 'Rawan', 
-                'value' => $pRawan, 
-            );
-            return $returnVal;
-        }
-    }
-    public function rescale_rain($param){
-        if($param <= 2.94934){
-            return 'RENDAH';
-        }elseif ($param > 2.94934 && $param <= 5.89719) {
-            return 'SEDANG';
-        }else{
-            return 'TINGGI';
-        }
-    }
-    public function rescale_slope($param){
-        if($param < 0.14673){
-            return 'LANDAI';
-        }elseif ($param > 0.14673 && $param <= 0.21453) {
-            return 'SEDANG';
-        }else{
-            return 'CURAM';
-        }
-    }
-    public function readOrderSheet($sheet){
-        $data = [];
-        foreach ($sheet->getRowIterator() as $idx => $row) {
-         array_push($data,$row);
-        }
-        return $data;
-    }
-    private function getColorMarker($param){
-        if (empty($param->status)) {
-            return "#ecf0f1";
-        }else if ($param->status == "Aman") {
-            return "#2ecc71";
-        }else{
-            return "#e74c3c";
-        }
-    }
-    public function maps(){
-        $data = LatlongModel::with('area')->get();
-
-        $hulu = ParameterBayesModel::where('area_id','2')->orderBy('date', 'desc')->first();
-        $tengah = ParameterBayesModel::where('area_id','1')->orderBy('date', 'desc')->first();
-        $hilir = ParameterBayesModel::where('area_id','3')->orderBy('date', 'desc')->first();
-
-        $colorHulu = $this->getColorMarker($hulu);
-        $colorTengah = $this->getColorMarker($tengah);
-        $colorHilir = $this->getColorMarker($hilir);
-        
-        $params = array(
-            array(),
-            array(),
-            array(),
-        );
-        $color = array(
-            array(
-                'strokeColor' => $colorHulu,
-                'strokeOpacity' => 0.8,
-                'strokeWeight' => 2,
-                'fillColor' => $colorHulu,
-                'fillOpacity' => 0.4,
-            ),
-            array(
-                'strokeColor' => $colorTengah,
-                'strokeOpacity' => 0.8,
-                'strokeWeight' => 2,
-                'fillColor' => $colorTengah,
-                'fillOpacity' => 0.4
-            ),
-            array(
-                'strokeColor' => $colorHilir,
-                'strokeOpacity' => 0.8,
-                'strokeWeight' => 2,
-                'fillColor' => $colorHilir,
-                'fillOpacity' => 0.4
-            ),
-        );
-        foreach ($data as $key) {
-            $a = array(
-                'latitude' => $key->latitude,
-                'longitude' => $key->longitude,
-            );
-            if($key->area_id == 3){
-                array_push($params[0],$a);
-            }else if($key->area_id == 2){
-                array_push($params[1],$a);
-            }else{
-                array_push($params[2],$a);
-            }
-        }
-        Mapper::map(-7.642431,110.47158);
-        
-        for ($i=0; $i < 3; $i++) { 
-            Mapper::polygon(
-                $params[$i],
-                $color[$i]
-            ); 
-        }
-        return view('map');
-    }
-
-    public function loadData(){
-        $datasExcel = [];
-        $file = "C:\Users\BM\Google Drive\Skripsi\Percobaan NaiveBayes.xlsx"; 
-        $reader = ReaderFactory::create(Type::XLSX );
-        // $reader->setFieldDelimiter(',');
-        // $reader->setEndOfLineCharacter("\n");
-        $reader->open($file);
-            foreach ($reader->getSheetIterator() as $sheet) {
-                $dataExcel = $this->readOrderSheet($sheet);
-                array_push($datasExcel,$dataExcel);
-            }   
-        // var_dump($datasExcel[0]);
-        $reader->close();
-        for ($i=0; $i < count($datasExcel[0]) ; $i++) { 
-            if($i > 0){
-                $sungai = $datasExcel[0][$i][0]." ".$datasExcel[0][$i][1];
-                if($datasExcel[0][$i][0] == "Gendol"){
-                    if ($sungai == "Gendol Tengah") {
-                        $areaid = 1;
-                    }else if($sungai == "Gendol Hulu"){
-                        $areaid = 2;
-                    }else{
-                        $areaid = 3;
-                    }
-
-                    $data = New ParameterModel;
-                    $data->rainfall = $datasExcel[0][$i][2];
-                    $data->soil = $datasExcel[0][$i][8];
-                    $data->slope = $datasExcel[0][$i][5];
-                    $data->status = $datasExcel[0][$i][9];
-                    $data->area_id = $areaid;
-                    $data->save();
-                    echo "Save success \n";
-                }else{
-                    echo "gagal\n";
-                }
-            }else{
-                echo "1 \n";
-            }
-        }
-        // var_dump($dataExcel[0]);      
     }
 
 }

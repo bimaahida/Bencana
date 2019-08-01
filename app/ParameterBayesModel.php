@@ -8,7 +8,7 @@ class ParameterBayesModel extends Model
 {
     public $timestamps = false;
     
-    protected $table = 'parameter_Bayes';
+    protected $table = 'parameter_bayes';
     
     protected $primaryKey= 'id';
     
@@ -18,6 +18,6 @@ class ParameterBayesModel extends Model
         'slope',
         'date',
         'status',
-        'area_id',
+        'location_id',
     ];
 }

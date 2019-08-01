@@ -5,10 +5,13 @@ namespace Banjir\Http\Controllers;
 use Illuminate\Http\Request;
 use Banjir\Http\Controllers\Controller;
 use Banjir\AreaModel;
-use Banjir\LatlongModel;
+use Banjir\LocationModel;
+use Banjir\ParameterBayesModel;
+use Banjir\ParameterModel;
 use Yajra\Datatables\Datatables;
 use Banjir\Exceptions\Handler;
 use Validator;
+use URL;
 use Mapper;
 
 class WilayahController extends Controller
@@ -82,34 +85,87 @@ class WilayahController extends Controller
      */
     public function show($id)
     {
-        $data = AreaModel::with('LatLongs')->where('id',$id)->get();
-        $params = array();
+        $data = AreaModel::with('location')->where('id',$id)->get();
+        // var_dump($data);
 
         if(empty($data)){
             return redirect()
                 ->route('wilayah.index')
                 ->withErrors('Data Not Found !');
         }else{
+            Mapper::map(-7.642431,110.457015,['zoom' =>12,]);
             foreach ($data as $key) {
-                foreach($key->LatLongs as $lat){
-                    $a = array(
-                        'latitude' => $lat->latitude,
-                        'longitude' => $lat->longitude,
+                foreach($key->location as $lat){
+                    // $status = ParameterBayesModel::orderBy('date','DESC')->where('location_id',$lat->id)->first();
+                    // if(empty($status)){
+                    //     $status = ParameterModel::orderBy('date','DESC')->where('location_id',$lat->id)->first();
+                    // }
+                    $html = '<div class="container-fluid">
+                        <div class="row">
+                            <div class="col-md-12">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <h5 class="text-left">
+                                            '.$key->name.' '.$lat->id.'
+                                        </h5>
+                                    </div>
+                                </div>
+                                <table class="table table-hover table-sm">
+                                    <tbody>
+                                        <tr>
+                                            <td>
+                                                Latitude
+                                            </td>
+                                            <td>
+                                                '.$lat->latitude.'
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <td>
+                                                Longitude
+                                            </td>
+                                            <td>
+                                                '.$lat->longitude.'
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <td>
+                                                Row pada Excel
+                                            </td>
+                                            <td>
+                                                '.$lat->row.'
+                                            </td>
+                                        </tr>
+                                        <tr>
+                                            <td>
+                                                Colum pada Excel
+                                            </td>
+                                            <td>
+                                                '.$lat->colum.'
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>';
+                    Mapper::informationWindow(
+                        $lat->latitude,
+                        $lat->longitude, 
+                        $html, 
+                        [
+                            'open' => false, 
+                            'maxWidth'=> 500,
+                            'icon' =>  URL::to('/').'/location.png', 
+                            'markers' => 
+                                [
+                                    'title' => 'Title',
+                                ]
+                        ]
                     );
-                    array_push($params,$a);
                 }
             }
-            Mapper::map(-7.642431,110.457015,['zoom' =>12,]);
-            Mapper::polygon(
-                $params,
-                [
-                    'strokeColor' => '#f1c40f',
-                    'strokeOpacity' => 0.8,
-                    'strokeWeight' => 2,
-                    'fillColor' => '#f1c40f',
-                    'fillOpacity' => 0.4,
-                ]
-            );
+            // var_dump($status);
             return view('wilayah.detail',$data[0]);   
         }
     }
@@ -182,6 +238,12 @@ class WilayahController extends Controller
                 ->route('wilayah.index')
                 ->withErrors('Data Not Found !');
         }else{
+            $locDel = LocationModel::where('area_id',$id)->get();
+            foreach ($locDel as $val) {
+                ParameterModel::where('location_id',$val->id)->delete();
+                ParameterBayesModel::where('location_id',$val->id)->delete();
+            }
+            LocationModel::where('area_id',$id)->delete();
             $data->delete();
             return redirect()
                 ->route('wilayah.index')
@@ -203,7 +265,7 @@ class WilayahController extends Controller
         ->make(true);
     }
     public function dataTablesDetail($area){
-        $datas = LatlongModel::where('area_id',$area)->get();
+        $datas = LocationModel::where('area_id',$area)->get();
         return Datatables::of($datas)
         ->addColumn('delete_url', function ($datas) {
             return route('position.destroy', ['id' => $datas->id,'area' => $datas->area_id]);

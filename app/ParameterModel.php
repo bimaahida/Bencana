@@ -18,6 +18,9 @@ class ParameterModel extends Model
         'slope',
         'date',
         'status',
-        'area_id',
+        'location_id',
     ];
+    public function location(){
+        return $this->belongsTo('Banjir\LocationModel','location_id','id');
+    } 
 }

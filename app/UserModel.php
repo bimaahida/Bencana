@@ -4,19 +4,17 @@ namespace Banjir;
 
 use Illuminate\Database\Eloquent\Model;
 
-class AreaModel extends Model
+class UserModel extends Model
 {
     public $timestamps = false;
     
-    protected $table = 'area';
+    protected $table = 'user';
     
     protected $primaryKey= 'id';
     
     protected $fillable = [
+        'username',
+        'password',
         'name',
     ];
-
-    public function location(){
-        return $this->hasMany('Banjir\LocationModel','area_id',$this->primaryKey);
-    }
 }
